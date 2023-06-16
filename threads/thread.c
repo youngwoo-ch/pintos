@@ -109,6 +109,7 @@ thread_init (void) {
 	lgdt (&gdt_ds);
 
 	/* Init the globla thread context */
+    check_unsleep_tick = INT64_MAX;
 	lock_init (&tid_lock);
 	list_init (&ready_list);
 	list_init (&sleep_list);
@@ -601,6 +602,7 @@ void thread_sleep (int64_t tick) {
 
     ASSERT (curr != idle_thread);
 
+    curr->unsleep_tick = tick;
     update_check_unsleep_tick (tick);
     list_push_back (&sleep_list, &curr->elem);
 
@@ -610,7 +612,6 @@ void thread_sleep (int64_t tick) {
 }
 
 void thread_unsleep (int64_t tick) {
-    check_unsleep_tick = INT64_MAX;
     struct list_elem *e = list_begin (&sleep_list);
 
     while (e != list_end (&sleep_list)) {
