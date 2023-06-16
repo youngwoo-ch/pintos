@@ -27,6 +27,9 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
+static struct list sleep_list;
+
+static int64_t check_unsleep_tick;
 
 /* Idle thread. */
 static struct thread *idle_thread;
@@ -108,6 +111,7 @@ thread_init (void) {
 	/* Init the globla thread context */
 	lock_init (&tid_lock);
 	list_init (&ready_list);
+	list_init (&sleep_list);
 	list_init (&destruction_req);
 
 	/* Set up a thread structure for the running thread. */
@@ -587,4 +591,46 @@ allocate_tid (void) {
 	lock_release (&tid_lock);
 
 	return tid;
+}
+
+void thread_sleep (int64_t tick) {
+    struct thread *curr = thread_current ();
+
+    enum intr_level old_level;
+    old_level = intr_disable ();
+
+    ASSERT (curr != idle_thread);
+
+    update_check_unsleep_tick (tick);
+    list_push_back (&sleep_list, &curr->elem);
+
+    thread_block ();
+
+    intr_set_level (old_level);
+}
+
+void thread_unsleep (int64_t tick) {
+    check_unsleep_tick = INT64_MAX;
+    struct list_elem *e = list_begin (&sleep_list);
+
+    while (e != list_end (&sleep_list)) {
+        struct thread *t = list_entry (e, struct thread, elem);
+
+        if (tick > t->unsleep_tick) {
+            e = list_remove (&t->elem);
+            thread_unblock (t);
+        }
+        else {
+            e = list_next (e);
+            update_check_unsleep_tick (t->unsleep_tick);
+        }
+    }
+}
+
+void update_check_unsleep_tick (int64_t tick) {
+    check_unsleep_tick = (check_unsleep_tick > tick) ? tick : check_unsleep_tick;
+}
+
+int64_t get_check_unsleep_tick (void) {
+    return check_unsleep_tick;
 }
