@@ -95,6 +95,9 @@ struct thread {
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 
+    /* additional variable for project thread */
+    int64_t unsleep_tick;
+
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
@@ -142,5 +145,11 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 void do_iret (struct intr_frame *tf);
+
+void thread_sleep (int64_t tick);
+void thread_unsleep (int64_t tick);
+
+void update_check_unsleep_tick (int64_t tick);
+int64_t get_check_unsleep_tick (void);
 
 #endif /* threads/thread.h */
