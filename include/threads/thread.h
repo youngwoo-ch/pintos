@@ -149,7 +149,7 @@ void do_iret (struct intr_frame *tf);
 void thread_sleep (int64_t tick);
 void thread_unsleep (int64_t tick);
 
-//void update_check_unsleep_tick (int64_t tick);
-//int64_t get_check_unsleep_tick (void);
+bool thread_compare_priority (struct list_elem *a, struct list_elem *b, void *aux UNUSED);
+void thread_update_priority_ordered (void);
 
 #endif /* threads/thread.h */
