@@ -29,8 +29,6 @@
 static struct list ready_list;
 static struct list sleep_list;
 
-static int64_t check_unsleep_tick;
-
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -109,7 +107,6 @@ thread_init (void) {
 	lgdt (&gdt_ds);
 
 	/* Init the globla thread context */
-    check_unsleep_tick = INT64_MAX;
 	lock_init (&tid_lock);
 	list_init (&ready_list);
 	list_init (&sleep_list);
@@ -603,7 +600,6 @@ void thread_sleep (int64_t tick) {
     ASSERT (curr != idle_thread);
 
     curr->unsleep_tick = tick;
-    update_check_unsleep_tick (tick);
     list_push_back (&sleep_list, &curr->elem);
 
     thread_block ();
@@ -617,21 +613,12 @@ void thread_unsleep (int64_t tick) {
     while (e != list_end (&sleep_list)) {
         struct thread *t = list_entry (e, struct thread, elem);
 
-        if (tick > t->unsleep_tick) {
+        if (tick >= t->unsleep_tick) {
             e = list_remove (&t->elem);
             thread_unblock (t);
         }
         else {
             e = list_next (e);
-            update_check_unsleep_tick (t->unsleep_tick);
         }
     }
-}
-
-void update_check_unsleep_tick (int64_t tick) {
-    check_unsleep_tick = (check_unsleep_tick > tick) ? tick : check_unsleep_tick;
-}
-
-int64_t get_check_unsleep_tick (void) {
-    return check_unsleep_tick;
 }
