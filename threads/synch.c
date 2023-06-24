@@ -193,7 +193,7 @@ lock_acquire (struct lock *lock) {
 
    struct thread *curr = thread_current ();
 
-   if (lock->holder) {
+   if (lock->holder && !thread_mlfqs) {
       curr->wait_on_lock = lock;
       list_insert_ordered (&lock->holder->donations_list, &curr->donation_elem, donation_compare_priority, NULL);
       donate_priority_recursive (curr);
@@ -234,8 +234,10 @@ lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
-   remove_hold_lock (lock);
-   refresh_donation_priority ();
+   if (!thread_mlfqs) {
+      remove_hold_lock (lock);
+      refresh_donation_priority ();
+   }
 
 	lock->holder = NULL;
 	sema_up (&lock->semaphore);

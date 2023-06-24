@@ -16,6 +16,7 @@
 #if TIMER_FREQ > 1000
 #error TIMER_FREQ <= 1000 recommended
 #endif
+#define TIME_SLICE 4
 
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
@@ -120,12 +121,25 @@ void
 timer_print_stats (void) {
 	printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
-
+
 /* Timer interrupt handler. */
 static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 	thread_tick ();
+
+	if (thread_mlfqs) {
+		mlfqs_increment_recent_cpu ();
+
+		if (ticks % TIME_SLICE == 0) {
+			mlfqs_recalculate_priority ();
+
+			if (ticks % TIMER_FREQ == 0) {
+				mlfqs_recalculate_recent_cpu ();
+				mlfqs_calculate_load_avg ();
+			}
+		}
+	}
 
     thread_unsleep (ticks);
 }
