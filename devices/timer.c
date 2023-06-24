@@ -127,9 +127,7 @@ timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 	thread_tick ();
 
-	if (ticks >= get_check_unsleep_tick ()) {
-	    thread_unsleep (ticks);
-	}
+    thread_unsleep (ticks);
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

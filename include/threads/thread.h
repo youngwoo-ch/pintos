@@ -95,8 +95,14 @@ struct thread {
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 
-    /* additional variable for project thread */
+    /* alarm clock */
     int64_t unsleep_tick;
+
+	/* priority donation */
+	int init_priority;
+	struct lock *wait_on_lock;
+	struct list donations_list;
+	struct list_elem donation_elem;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -149,7 +155,7 @@ void do_iret (struct intr_frame *tf);
 void thread_sleep (int64_t tick);
 void thread_unsleep (int64_t tick);
 
-void update_check_unsleep_tick (int64_t tick);
-int64_t get_check_unsleep_tick (void);
+bool thread_compare_priority (struct list_elem *a, struct list_elem *b, void *aux UNUSED);
+void thread_update_priority_ordered (void);
 
 #endif /* threads/thread.h */
