@@ -317,6 +317,9 @@ thread_yield (void) {
 void
 thread_set_priority (int new_priority) {
 	thread_current ()->priority = new_priority;
+	thread_current ()->init_priority = new_priority;
+
+	refresh_donation_priority ();
 	thread_update_priority_ordered ();
 }
 
@@ -414,9 +417,11 @@ init_thread (struct thread *t, const char *name, int priority) {
 	strlcpy (t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
+
 	t->init_priority = priority;
 	t->wait_on_lock = NULL;
 	list_init (&t->donations_list);
+	
 	t->magic = THREAD_MAGIC;
 }
 
