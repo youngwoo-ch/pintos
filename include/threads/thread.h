@@ -95,8 +95,14 @@ struct thread {
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 
-    /* additional variable for project thread */
+    /* alarm clock */
     int64_t unsleep_tick;
+
+	/* priority donation */
+	int init_priority;
+	struct lock *wait_on_lock;
+	struct list donations_list;
+	struct list_elem donation_elem;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
