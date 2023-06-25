@@ -660,10 +660,10 @@ bool thread_compare_priority (struct list_elem *a, struct list_elem *b, void *au
 void thread_update_priority_ordered (void) {
     struct thread *curr = thread_current ();
 
-    if (list_empty (&ready_list))
+    if (curr == idle_thread || list_empty (&ready_list))
         return;
 
-    if (list_entry (list_front (&ready_list), struct thread, elem) > curr->priority)
+    if (list_entry (list_front (&ready_list), struct thread, elem)->priority > curr->priority)
         thread_yield ();
 }
 
