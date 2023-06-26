@@ -7,6 +7,7 @@
 #include "threads/palloc.h"
 #include "userprog/gdt.h"
 #include "threads/flags.h"
+#include "filesys/filesys.h"
 #include "intrinsic.h"
 
 void syscall_entry (void);
@@ -158,7 +159,8 @@ int wait (tid_t pid) {
 }
 
 int create (const char *file, unsigned initial_size) {
-
+	check_address (file);
+	return filesys_create (file, initial_size);
 }
 
 int remove (const char *file) {
