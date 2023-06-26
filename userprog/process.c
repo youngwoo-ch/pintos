@@ -50,6 +50,9 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
+	char *ptr;
+	strtok_r (file_name, " ", &ptr);
+
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
@@ -163,7 +166,10 @@ error:
 int
 process_exec (void *f_name) {
 	char *file_name = f_name;
+	char *copy_file_name = (char *) malloc (sizeof (char) * (strlen (file_name) + 1));
 	bool success;
+
+	memcpy (copy_file_name, file_name, strlen (file_name) + 1);
 
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
@@ -177,12 +183,14 @@ process_exec (void *f_name) {
 	process_cleanup ();
 
 	/* And then load the binary */
-	success = load (file_name, &_if);
+	success = load (copy_file_name, &_if);
 
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
 	if (!success)
 		return -1;
+
+	// hex_dump(_if.rsp, _if.rsp, KERN_BASE - _if.rsp, true);
 
 	/* Start switched process. */
 	do_iret (&_if);
@@ -204,6 +212,7 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	for (int i = 0; i < 1000000000; i++){}
 	return -1;
 }
 
@@ -316,6 +325,51 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		uint32_t read_bytes, uint32_t zero_bytes,
 		bool writable);
 
+int parse_commandline (char **argv, char *command) {
+	char *token, *save_ptr;
+	int argc = 0;
+
+	for (token = strtok_r (command, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)) {
+		argv[argc] = token;
+		argc++;
+	}
+
+	return argc;
+}
+
+void argument_stack (char **argv, int argc, struct intr_frame *if_) {
+	char *arg_address[128];
+
+	for (int i = argc-1; i>=0; i--) { 
+		int argv_len = strlen(argv[i]);
+		if_->rsp = if_->rsp - (argv_len + 1);
+		memcpy(if_->rsp, argv[i], argv_len+1);
+		arg_address[i] = if_->rsp;
+	}
+
+	while (if_->rsp % 8 != 0) {
+		if_->rsp--;
+		*(uint8_t *) if_->rsp = 0;
+	}
+	
+	for (int i = argc; i >=0; i--) {
+		if_->rsp = if_->rsp - 8;
+
+		if (i == argc) {
+			memset(if_->rsp, 0, sizeof(char **));
+		} 
+		else {
+			memcpy(if_->rsp, &arg_address[i], sizeof(char **));
+		}	
+	}
+	
+	if_->rsp = if_->rsp - 8;
+	memset(if_->rsp, 0, sizeof(void *));
+
+	if_->R.rdi  = argc;
+	if_->R.rsi = if_->rsp + 8;
+}
+
 /* Loads an ELF executable from FILE_NAME into the current thread.
  * Stores the executable's entry point into *RIP
  * and its initial stack pointer into *RSP.
@@ -328,6 +382,9 @@ load (const char *file_name, struct intr_frame *if_) {
 	off_t file_ofs;
 	bool success = false;
 	int i;
+
+	char **argv = (char **) malloc (sizeof (char *) * 128);
+	int argc = parse_commandline (argv, file_name);
 
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
@@ -416,6 +473,7 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+	argument_stack (argv, argc, if_);
 
 	success = true;
 
