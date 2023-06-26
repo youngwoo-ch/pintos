@@ -113,6 +113,8 @@ struct thread {
 
 	/* userprog */
 	int exit_status;
+	int fd_idx;
+	struct file **fd_table;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
