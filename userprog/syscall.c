@@ -118,7 +118,7 @@ void check_address(const uint64_t *uaddr) {
 }
 
 void halt(void) {
-
+	power_off ();
 }
 
 void exit(int status) {
