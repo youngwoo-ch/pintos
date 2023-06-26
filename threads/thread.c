@@ -663,7 +663,7 @@ void thread_update_priority_ordered (void) {
     if (list_empty (&ready_list))
         return;
 
-    if (list_entry (list_front (&ready_list), struct thread, elem) > curr->priority)
+    if (list_entry (list_front (&ready_list), struct thread, elem)->priority > curr->priority)
         thread_yield ();
 }
 
