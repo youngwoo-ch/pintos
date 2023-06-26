@@ -164,7 +164,8 @@ int create (const char *file, unsigned initial_size) {
 }
 
 int remove (const char *file) {
-
+	check_address (file);
+	return filesys_remove (file);
 }
 
 int open(const char *file) {
