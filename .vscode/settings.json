@@ -1,6 +1,0 @@
-{
-  "files.associations": {
-    "mlfqs.h": "c",
-    "thread": "c"
-  }
-}
