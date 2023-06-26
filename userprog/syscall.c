@@ -5,15 +5,23 @@
 #include "threads/thread.h"
 #include "threads/loader.h"
 #include "threads/palloc.h"
-#include "userprog/gdt.h"
 #include "threads/flags.h"
+#include "userprog/gdt.h"
+#include "userprog/process.h"
 #include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "kernel/stdio.h"
 #include "intrinsic.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
 void check_address(const uint64_t *uaddr);
+bool check_valid_fd (int fd);
+
+static struct file *fd_get_file (int fd);
+int fd_append_file (struct file *file);
+void fd_remove_file (int fd);
 
 void halt(void);
 void exit(int status);
@@ -117,6 +125,43 @@ void check_address(const uint64_t *uaddr) {
 	if (uaddr == NULL || is_kernel_vaddr(uaddr) || pml4_get_page(curr->pml4, uaddr) == NULL) {
 		exit(-1);
 	}
+}
+
+bool check_valid_fd (int fd) {
+	return fd < 0 || fd >= FDCOUNT_LIMIT;
+}
+
+static struct file *fd_get_file (int fd) {
+	struct thread *curr = thread_current ();
+
+	if (check_valid_fd (fd))
+		return NULL;
+	
+	return curr->fd_table[fd];
+}
+
+int fd_append_file (struct file *file) {
+	struct thread *curr = thread_current ();
+	struct file **fd_table = curr->fd_table;
+
+	if (check_valid_fd (curr->fd_idx)) {
+		return -1;
+	}
+	else if (fd_table[curr->fd_idx] != NULL) {
+		curr->fd_idx++;
+	}
+
+	fd_table[curr->fd_idx] = file;
+	return curr->fd_idx;
+}
+
+void fd_remove_file (int fd) {
+	struct thread *curr = thread_current ();
+
+	if (check_valid_fd (fd))
+		return;
+	
+	curr->fd_table[fd] = NULL;
 }
 
 void halt(void) {
