@@ -4,6 +4,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/loader.h"
+#include "threads/palloc.h"
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
@@ -135,7 +136,21 @@ tid_t fork(const char *thread_name, struct intr_frame *f) {
 }
 
 int exec(char *file_name) {
+	check_address (file_name);
 
+	int file_size = strlen (file_name) + 1;
+	char *file_copy = palloc_get_page (PAL_ZERO);
+
+	if (file_copy == NULL) 
+		exit (-1);
+
+	strlcpy (file_copy, file_name, file_size);
+
+	if (process_exec (file_copy) < 0) 
+		return -1;
+
+	NOT_REACHED ();
+	return 0;
 }
 
 int wait (tid_t pid) {
