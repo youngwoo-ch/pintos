@@ -212,6 +212,9 @@ thread_create (const char *name, int priority,
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
 
+
+	t->exit_status = 0;
+
 	/* Add to run queue. */
 	thread_unblock (t);
 	thread_update_priority_ordered ();
