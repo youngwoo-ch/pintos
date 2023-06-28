@@ -282,11 +282,31 @@ int read(int fd, void *buffer, unsigned size) {
 }
 
 int write(int fd, const void *buffer, unsigned size) {
-	printf ("%s", buffer);
+	check_address (buffer);
+
+	int ret = -1;
+	struct file *file = fd_get_file (fd);
+
+	if (file == NULL) {
+		return -1;
+	}
+
+	if (fd == STD_IN) {
+		ret = -1;
+	}
+	else if (fd == STD_OUT) {
+		putbuf (buffer, size);
+		ret = size;
+	}
+	else {
+		ret = file_write (file, buffer, size);
+	}
+
+	return ret;
 }
 
 void seek(int fd, unsigned position) {
-
+	
 }
 
 unsigned tell(int fd) {
