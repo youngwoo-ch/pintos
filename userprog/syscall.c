@@ -192,7 +192,7 @@ int exec(char *file_name) {
 	check_address (file_name);
 
 	int file_size = strlen (file_name) + 1;
-	char *file_copy = palloc_get_page (0);
+	char *file_copy = palloc_get_page (PAL_ZERO);
 
 	if (file_copy == NULL)
 		exit (TID_ERROR);
