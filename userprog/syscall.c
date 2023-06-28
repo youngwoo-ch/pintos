@@ -306,7 +306,12 @@ int write(int fd, const void *buffer, unsigned size) {
 }
 
 void seek(int fd, unsigned position) {
+	struct file *file = fd_get_file (fd);
+
+	if (file == NULL || fd <= STD_OUT)
+		return;
 	
+	file_tell (file);
 }
 
 unsigned tell(int fd) {
