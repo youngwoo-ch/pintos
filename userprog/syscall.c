@@ -4,14 +4,24 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/loader.h"
-#include "userprog/gdt.h"
+#include "threads/palloc.h"
 #include "threads/flags.h"
+#include "userprog/gdt.h"
+#include "userprog/process.h"
+#include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "kernel/stdio.h"
 #include "intrinsic.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
 void check_address(const uint64_t *uaddr);
+bool check_valid_fd (int fd);
+
+static struct file *fd_get_file (int fd);
+int fd_append_file (struct file *file);
+void fd_remove_file (int fd);
 
 void halt(void);
 void exit(int status);
@@ -20,7 +30,7 @@ int exec(char *file_name);
 int wait (tid_t pid);
 int create (const char *file, unsigned initial_size);
 int remove (const char *file);
-int open(const char *file);
+int open(const char *file_name);
 int filesize(int fd);
 int read(int fd, void *buffer, unsigned size);
 int write(int fd, const void *buffer, unsigned size);
@@ -52,6 +62,8 @@ syscall_init (void) {
 	 * mode stack. Therefore, we masked the FLAG_FL. */
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+
+	lock_init (&file_lock);
 }
 
 /* The main system call interface */
@@ -70,7 +82,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		f->R.rax = fork (f->R.rdi, f);
 		break;
 	case SYS_EXEC:
-		if (exec (f->R.rdi) < 0) exit (-1);
+		if (exec (f->R.rdi) < 0) exit (TID_ERROR);
 		break;
 	case SYS_WAIT:
 		f->R.rax = wait (f->R.rdi);
@@ -111,14 +123,56 @@ syscall_handler (struct intr_frame *f UNUSED) {
 
 void check_address(const uint64_t *uaddr) {
 	struct thread *curr = thread_current();
-
-	if (uaddr == NULL || is_kernel_vaddr(uaddr) || pml4_get_page(curr->pml4, uaddr) == NULL) {
-		exit(-1);
+	
+	if (uaddr == NULL || !is_user_vaddr(uaddr) || pml4_get_page(curr->pml4, uaddr) == NULL) {
+		exit(TID_ERROR);
 	}
 }
 
-void halt(void) {
+bool check_valid_fd (int fd) {
+	return fd < 0 || fd >= FDCOUNT_LIMIT;
+}
 
+static struct file *fd_get_file (int fd) {
+	struct thread *curr = thread_current ();
+
+	if (check_valid_fd (fd))
+		return NULL;
+	
+	return curr->fd_table[fd];
+}
+
+int fd_append_file (struct file *file) {
+	struct thread *curr = thread_current ();
+	struct file **fd_table = curr->fd_table;
+
+	if (check_valid_fd (curr->fd_idx)) {
+		return -1;
+	}
+	
+	while (fd_table[curr->fd_idx] != NULL) {
+		curr->fd_idx++;
+
+		if (check_valid_fd (curr->fd_idx))
+			return -1;
+	}
+
+	fd_table[curr->fd_idx] = file;
+
+	return curr->fd_idx;
+}
+
+void fd_remove_file (int fd) {
+	struct thread *curr = thread_current ();
+
+	if (check_valid_fd (fd))
+		return;
+	
+	curr->fd_table[fd] = NULL;
+}
+
+void halt(void) {
+	power_off ();
 }
 
 void exit(int status) {
@@ -131,49 +185,156 @@ void exit(int status) {
 }
 
 tid_t fork(const char *thread_name, struct intr_frame *f) {
-
+	return process_fork (thread_name, f);
 }
 
 int exec(char *file_name) {
+	check_address (file_name);
 
+	int file_size = strlen (file_name) + 1;
+	char *file_copy = palloc_get_page (PAL_ZERO);
+
+	if (file_copy == NULL)
+		exit (TID_ERROR);
+
+	strlcpy (file_copy, file_name, file_size);
+
+	if (process_exec (file_copy) < 0)
+		return -1;
+
+	NOT_REACHED ();
+	return 0;
 }
 
 int wait (tid_t pid) {
-
+	return process_wait (pid);
 }
 
 int create (const char *file, unsigned initial_size) {
-
+	check_address (file);
+	return filesys_create (file, initial_size);
 }
 
 int remove (const char *file) {
-
+	check_address (file);
+	return filesys_remove (file);
 }
 
-int open(const char *file) {
+int open(const char *file_name) {
+	check_address (file_name);
 
+	lock_acquire (&file_lock);
+
+	struct file *file = filesys_open (file_name);
+
+	if (file == NULL) {
+		lock_release (&file_lock);
+		return -1;
+	}
+
+	int fd = fd_append_file (file);
+
+	if (fd == -1) {
+		file_close (file);
+	}
+
+	lock_release (&file_lock);
+
+	return fd;
 }
 
 int filesize(int fd) {
+	struct file *file = fd_get_file (fd);
 
+	if (file == NULL)
+		return -1;
+	
+	return file_length (file);
 }
 
 int read(int fd, void *buffer, unsigned size) {
+	check_address (buffer);
 
+	lock_acquire (&file_lock);
+
+	int ret = -1;
+
+	if (fd == STD_IN) {
+		int i;
+		unsigned char *buf = buffer;
+
+		for (i = 0; i < size; i++) {
+			char c = input_getc ();
+			*buf++ = c;
+			
+			if (c == '\0')
+				break;
+		}
+
+		ret = i;
+	}
+	else if (fd == STD_OUT) {
+		ret = -1;
+	}
+	else {
+		struct file *file = fd_get_file (fd);
+		ret = (file == NULL) ? -1 : file_read (file, buffer, size);
+	}
+
+	lock_release (&file_lock);
+
+	return ret;
 }
 
 int write(int fd, const void *buffer, unsigned size) {
-	printf ("%s", buffer);
+	check_address (buffer);
+
+	lock_acquire (&file_lock);
+
+	int ret = -1;
+
+	if (fd == STD_IN) {
+		ret = -1;
+	}
+	else if (fd == STD_OUT) {
+		putbuf (buffer, size);
+		ret = size;
+	}
+	else {
+		struct file *file = fd_get_file (fd);
+		ret = (file == NULL) ? -1 : file_write (file, buffer, size);
+	}
+
+	lock_release (&file_lock);
+
+	return ret;
 }
 
 void seek(int fd, unsigned position) {
+	struct file *file = fd_get_file (fd);
 
+	if (file == NULL || fd <= STD_OUT)
+		return;
+	
+	file_seek (file, position);
 }
 
 unsigned tell(int fd) {
+	struct file *file = fd_get_file (fd);
 
+	if (file == NULL || fd <= STD_OUT)
+		return;
+	
+	return file_tell (file);
 }
 
 void close(int fd) {
+	struct file *file = fd_get_file (fd);
 
+	if (file == NULL || fd <= STD_OUT)
+		return;
+	
+	fd_remove_file (fd);
+
+	file_close (file);
 }

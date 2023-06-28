@@ -201,6 +201,19 @@ thread_create (const char *name, int priority,
 	init_thread (t, name, priority);
 	tid = t->tid = allocate_tid ();
 
+	/* userprog */
+	t->fd_idx = 2;
+	t->fd_table = palloc_get_multiple (PAL_ZERO, FDT_PAGES);
+
+	if (t->fd_table == NULL) 
+		return TID_ERROR;
+	
+	// t->fd_table[STD_IN] = STD_IN + 1;
+	// t->fd_table[STD_OUT] = STD_OUT + 1;
+
+	struct thread *parent = thread_current ();
+	list_push_back (&parent->child_list, &t->child_elem);
+
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
 	t->tf.rip = (uintptr_t) kernel_thread;
@@ -211,9 +224,6 @@ thread_create (const char *name, int priority,
 	t->tf.ss = SEL_KDSEG;
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
-
-
-	t->exit_status = 0;
 
 	/* Add to run queue. */
 	thread_unblock (t);
@@ -435,9 +445,20 @@ init_thread (struct thread *t, const char *name, int priority) {
 	strlcpy (t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
+
+	/* thread */
 	t->init_priority = priority;
 	t->wait_on_lock = NULL;
 	list_init (&t->donations_list);
+
+	/* userprog */
+	t->exit_status = 0;
+	t->open_file = NULL;
+	list_init (&t->child_list);
+
+	sema_init (&t->fork_sema, 0);
+	sema_init (&t->wait_sema, 0);
+	sema_init (&t->exit_sema, 0);
 
 	t->magic = THREAD_MAGIC;
 
@@ -670,6 +691,25 @@ void thread_update_priority_ordered (void) {
         thread_yield ();
 }
 
+struct thread *thread_get_child (tid_t tid) {
+	struct thread *curr = thread_current ();
+
+	if (list_empty (&curr->child_list))
+		return NULL;
+	
+	for (struct list_elem *e = list_begin (&curr->child_list); e != list_end (&curr->child_list); e = list_next (e)) {
+		struct thread *t = list_entry (e, struct thread, child_elem);
+
+		if (t->tid == tid)
+			return t;
+	}
+
+	return NULL;
+}
+
+
+
+/* mlfqs */
 void mlfqs_calculate_priority (struct thread *t) {
 	if (t == idle_thread)
 		return;
