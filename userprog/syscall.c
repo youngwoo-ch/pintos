@@ -311,7 +311,7 @@ void seek(int fd, unsigned position) {
 	if (file == NULL || fd <= STD_OUT)
 		return;
 	
-	file_tell (file);
+	file_seek (file);
 }
 
 unsigned tell(int fd) {
