@@ -13,6 +13,9 @@
 #include "kernel/stdio.h"
 #include "intrinsic.h"
 
+#define STD_IN 0
+#define STD_OUT 1
+
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
@@ -245,7 +248,37 @@ int filesize(int fd) {
 }
 
 int read(int fd, void *buffer, unsigned size) {
-	
+	check_address (buffer);
+
+	int ret = -1;
+	struct file *file = fd_get_file (fd);
+
+	if (file == NULL) {
+		return -1;
+	}
+
+	if (fd == STD_IN) {
+		int i;
+		unsigned char *buf = buffer;
+
+		for (i = 0; i < size; i++) {
+			char c = input_getc ();
+			*buf++ = c;
+			
+			if (c == '\0')
+				break;
+		}
+
+		ret = i;
+	}
+	else if (fd == STD_OUT) {
+		ret = -1;
+	}
+	else {
+		ret = file_read (file, buffer, size);
+	}
+
+	return ret;
 }
 
 int write(int fd, const void *buffer, unsigned size) {
