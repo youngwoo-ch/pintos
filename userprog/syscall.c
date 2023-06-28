@@ -320,9 +320,16 @@ unsigned tell(int fd) {
 	if (file == NULL || fd <= STD_OUT)
 		return;
 	
-	file_tell (file);
+	return file_tell (file);
 }
 
 void close(int fd) {
+	struct file *file = fd_get_file (fd);
 
+	if (file == NULL || fd <= STD_OUT)
+		return;
+	
+	fd_remove_file (fd);
+
+	file_close (file);
 }
