@@ -13,9 +13,6 @@
 #include "kernel/stdio.h"
 #include "intrinsic.h"
 
-#define STD_IN 0
-#define STD_OUT 1
-
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
@@ -65,6 +62,8 @@ syscall_init (void) {
 	 * mode stack. Therefore, we masked the FLAG_FL. */
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+
+	lock_init (&file_lock);
 }
 
 /* The main system call interface */
@@ -83,7 +82,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		f->R.rax = fork (f->R.rdi, f);
 		break;
 	case SYS_EXEC:
-		if (exec (f->R.rdi) < 0) exit (-1);
+		if (exec (f->R.rdi) < 0) exit (TID_ERROR);
 		break;
 	case SYS_WAIT:
 		f->R.rax = wait (f->R.rdi);
@@ -126,7 +125,7 @@ void check_address(const uint64_t *uaddr) {
 	struct thread *curr = thread_current();
 
 	if (uaddr == NULL || is_kernel_vaddr(uaddr) || pml4_get_page(curr->pml4, uaddr) == NULL) {
-		exit(-1);
+		exit(TID_ERROR);
 	}
 }
 
@@ -150,11 +149,13 @@ int fd_append_file (struct file *file) {
 	if (check_valid_fd (curr->fd_idx)) {
 		return -1;
 	}
-	else if (fd_table[curr->fd_idx] != NULL) {
+	
+	while (fd_table[curr->fd_idx] != NULL) {
 		curr->fd_idx++;
 	}
 
 	fd_table[curr->fd_idx] = file;
+
 	return curr->fd_idx;
 }
 
@@ -181,7 +182,7 @@ void exit(int status) {
 }
 
 tid_t fork(const char *thread_name, struct intr_frame *f) {
-
+	return process_fork (thread_name, f);
 }
 
 int exec(char *file_name) {
@@ -191,7 +192,7 @@ int exec(char *file_name) {
 	char *file_copy = palloc_get_page (0);
 
 	if (file_copy == NULL)
-		exit (-1);
+		exit (TID_ERROR);
 
 	strlcpy (file_copy, file_name, file_size);
 
@@ -203,7 +204,7 @@ int exec(char *file_name) {
 }
 
 int wait (tid_t pid) {
-
+	return process_wait (pid);
 }
 
 int create (const char *file, unsigned initial_size) {

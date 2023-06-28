@@ -207,6 +207,12 @@ thread_create (const char *name, int priority,
 
 	if (t->fd_table == NULL) 
 		return TID_ERROR;
+	
+	// t->fd_table[STD_IN] = STD_IN + 1;
+	// t->fd_table[STD_OUT] = STD_OUT + 1;
+
+	struct thread *parent = thread_current ();
+	list_push_back (&parent->child_list, &t->child_elem);
 
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
@@ -447,6 +453,11 @@ init_thread (struct thread *t, const char *name, int priority) {
 
 	/* userprog */
 	t->exit_status = 0;
+	list_init (&t->child_list);
+
+	sema_init (&t->fork_sema, 0);
+	sema_init (&t->wait_sema, 0);
+	sema_init (&t->exit_sema, 0);
 
 	t->magic = THREAD_MAGIC;
 
@@ -679,6 +690,25 @@ void thread_update_priority_ordered (void) {
         thread_yield ();
 }
 
+struct thread *thread_get_child (tid_t tid) {
+	struct thread *curr = thread_current ();
+
+	if (list_empty (&curr->child_list))
+		return NULL;
+	
+	for (struct list_elem *e = list_begin (&curr->child_list); e != list_end (&curr->child_list); e = list_next (e)) {
+		struct thread *t = list_entry (e, struct thread, child_elem);
+
+		if (t->tid == tid)
+			return t;
+	}
+
+	return NULL;
+}
+
+
+
+/* mlfqs */
 void mlfqs_calculate_priority (struct thread *t) {
 	if (t == idle_thread)
 		return;

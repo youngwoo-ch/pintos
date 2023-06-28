@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+#include "threads/synch.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -30,6 +31,9 @@ typedef int tid_t;
 
 #define FDT_PAGES 3
 #define FDCOUNT_LIMIT FDT_PAGES * (1 << 9)
+
+#define STD_IN 0
+#define STD_OUT 1
 
 #define NICE_DEFAULT 0
 #define RECENT_CPU_DEFAULT 0
@@ -117,8 +121,17 @@ struct thread {
 
 	/* userprog */
 	int exit_status;
+
 	int fd_idx;
 	struct file **fd_table;
+
+	struct intr_frame parent_if;
+	struct list child_list;
+	struct list_elem child_elem;
+
+	struct semaphore fork_sema;
+	struct semaphore wait_sema;
+	struct semaphore exit_sema;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -173,6 +186,8 @@ void thread_unsleep (int64_t tick);
 
 bool thread_compare_priority (struct list_elem *a, struct list_elem *b, void *aux UNUSED);
 void thread_update_priority_ordered (void);
+
+struct thread *thread_get_child (tid_t tid);
 
 void mlfqs_calculate_priority (struct thread *t);
 void mlfqs_calculate_recent_cpu (struct thread *t);
