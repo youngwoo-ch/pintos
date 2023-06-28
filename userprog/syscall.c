@@ -315,7 +315,12 @@ void seek(int fd, unsigned position) {
 }
 
 unsigned tell(int fd) {
+	struct file *file = fd_get_file (fd);
+
+	if (file == NULL || fd <= STD_OUT)
+		return;
 	
+	file_tell (file);
 }
 
 void close(int fd) {
