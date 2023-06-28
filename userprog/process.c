@@ -282,6 +282,7 @@ process_exit (void) {
 		close (i);
 
 	file_close (curr->open_file);
+	palloc_free_multiple (curr->fd_table, FDT_PAGES);
 
 	process_cleanup ();
 
