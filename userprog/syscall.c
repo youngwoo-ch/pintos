@@ -30,7 +30,7 @@ int exec(char *file_name);
 int wait (tid_t pid);
 int create (const char *file, unsigned initial_size);
 int remove (const char *file);
-int open(const char *file);
+int open(const char *file_name);
 int filesize(int fd);
 int read(int fd, void *buffer, unsigned size);
 int write(int fd, const void *buffer, unsigned size);
@@ -185,14 +185,14 @@ int exec(char *file_name) {
 	check_address (file_name);
 
 	int file_size = strlen (file_name) + 1;
-	char *file_copy = palloc_get_page (PAL_ZERO);
+	char *file_copy = palloc_get_page (0);
 
-	if (file_copy == NULL) 
+	if (file_copy == NULL)
 		exit (-1);
 
 	strlcpy (file_copy, file_name, file_size);
 
-	if (process_exec (file_copy) < 0) 
+	if (process_exec (file_copy) < 0)
 		return -1;
 
 	NOT_REACHED ();
@@ -213,8 +213,26 @@ int remove (const char *file) {
 	return filesys_remove (file);
 }
 
-int open(const char *file) {
+int open(const char *file_name) {
+	check_address (file_name);
 
+	if (file_name == NULL) {
+		return -1;
+	}
+
+	struct file *file = filesys_open (file_name);
+
+	if (file == NULL) {
+		return -1;
+	}
+
+	int fd = fd_append_file (file);
+
+	if (fd == -1) {
+		file_close (file);
+	}
+
+	return fd;
 }
 
 int filesize(int fd) {
