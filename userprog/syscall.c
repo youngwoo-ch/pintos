@@ -311,11 +311,11 @@ void seek(int fd, unsigned position) {
 	if (file == NULL || fd <= STD_OUT)
 		return;
 	
-	file_seek (file);
+	file_seek (file, position);
 }
 
 unsigned tell(int fd) {
-
+	
 }
 
 void close(int fd) {
