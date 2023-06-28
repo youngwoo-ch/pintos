@@ -236,11 +236,16 @@ int open(const char *file_name) {
 }
 
 int filesize(int fd) {
+	struct file *file = fd_get_file (fd);
 
+	if (file == NULL)
+		return -1;
+	
+	return file_length (file);
 }
 
 int read(int fd, void *buffer, unsigned size) {
-
+	
 }
 
 int write(int fd, const void *buffer, unsigned size) {
