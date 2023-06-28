@@ -182,15 +182,18 @@ __do_fork (void *aux) {
 
 	for (int i = 0; i < FDCOUNT_LIMIT; i++) {
 		if (parent->fd_table[i] != NULL) {
-			current->fd_table[i] = file_duplicate (parent->fd_table[i]);
+			if (i == STD_IN || i == STD_OUT)
+				current->fd_table[i] = parent->fd_table[i];
+			else
+				current->fd_table[i] = file_duplicate (parent->fd_table[i]);
 		}
 	}
 
 	current->fd_idx = parent->fd_idx;
+
 	if_.R.rax = 0;
 
 	sema_up (&current->fork_sema);
-
 	process_init ();
 
 	/* Finally, switch to the newly created process. */

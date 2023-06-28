@@ -126,6 +126,9 @@ struct thread {
 	struct file **fd_table;
 	struct file *open_file;
 
+	int count_stdin;
+	int count_stdout;
+
 	struct intr_frame parent_if;
 	struct list child_list;
 	struct list_elem child_elem;
