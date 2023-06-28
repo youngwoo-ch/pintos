@@ -253,10 +253,6 @@ int read(int fd, void *buffer, unsigned size) {
 	int ret = -1;
 	struct file *file = fd_get_file (fd);
 
-	if (file == NULL) {
-		return -1;
-	}
-
 	if (fd == STD_IN) {
 		int i;
 		unsigned char *buf = buffer;
@@ -275,6 +271,9 @@ int read(int fd, void *buffer, unsigned size) {
 		ret = -1;
 	}
 	else {
+		if (file == NULL)
+			return -1;
+		
 		ret = file_read (file, buffer, size);
 	}
 
@@ -287,10 +286,6 @@ int write(int fd, const void *buffer, unsigned size) {
 	int ret = -1;
 	struct file *file = fd_get_file (fd);
 
-	if (file == NULL) {
-		return -1;
-	}
-
 	if (fd == STD_IN) {
 		ret = -1;
 	}
@@ -299,6 +294,9 @@ int write(int fd, const void *buffer, unsigned size) {
 		ret = size;
 	}
 	else {
+		if (file == NULL)
+			return -1;
+		
 		ret = file_write (file, buffer, size);
 	}
 
