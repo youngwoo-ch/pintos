@@ -453,6 +453,7 @@ init_thread (struct thread *t, const char *name, int priority) {
 
 	/* userprog */
 	t->exit_status = 0;
+	t->open_file = NULL;
 	list_init (&t->child_list);
 
 	sema_init (&t->fork_sema, 0);

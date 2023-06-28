@@ -124,6 +124,7 @@ struct thread {
 
 	int fd_idx;
 	struct file **fd_table;
+	struct file *open_file;
 
 	struct intr_frame parent_if;
 	struct list child_list;
