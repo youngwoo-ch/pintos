@@ -220,13 +220,12 @@ int remove (const char *file) {
 int open(const char *file_name) {
 	check_address (file_name);
 
-	if (file_name == NULL) {
-		return -1;
-	}
+	lock_acquire (&file_lock);
 
 	struct file *file = filesys_open (file_name);
 
 	if (file == NULL) {
+		lock_release (&file_lock);
 		return -1;
 	}
 
@@ -235,6 +234,8 @@ int open(const char *file_name) {
 	if (fd == -1) {
 		file_close (file);
 	}
+
+	lock_release (&file_lock);
 
 	return fd;
 }
@@ -250,6 +251,8 @@ int filesize(int fd) {
 
 int read(int fd, void *buffer, unsigned size) {
 	check_address (buffer);
+
+	lock_acquire (&file_lock);
 
 	int ret = -1;
 	struct file *file = fd_get_file (fd);
@@ -272,17 +275,23 @@ int read(int fd, void *buffer, unsigned size) {
 		ret = -1;
 	}
 	else {
-		if (file == NULL)
+		if (file == NULL) {
+			lock_release (&file_lock);
 			return -1;
+		}
 		
 		ret = file_read (file, buffer, size);
 	}
+
+	lock_release (&file_lock);
 
 	return ret;
 }
 
 int write(int fd, const void *buffer, unsigned size) {
 	check_address (buffer);
+
+	lock_acquire (&file_lock);
 
 	int ret = -1;
 	struct file *file = fd_get_file (fd);
@@ -295,11 +304,15 @@ int write(int fd, const void *buffer, unsigned size) {
 		ret = size;
 	}
 	else {
-		if (file == NULL)
+		if (file == NULL) {
+			lock_release (&file_lock);
 			return -1;
+		}
 		
 		ret = file_write (file, buffer, size);
 	}
+
+	lock_release (&file_lock);
 
 	return ret;
 }
