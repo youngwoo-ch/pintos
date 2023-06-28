@@ -123,8 +123,8 @@ syscall_handler (struct intr_frame *f UNUSED) {
 
 void check_address(const uint64_t *uaddr) {
 	struct thread *curr = thread_current();
-
-	if (uaddr == NULL || is_kernel_vaddr(uaddr) || pml4_get_page(curr->pml4, uaddr) == NULL) {
+	
+	if (uaddr == NULL || !is_user_vaddr(uaddr) || pml4_get_page(curr->pml4, uaddr) == NULL) {
 		exit(TID_ERROR);
 	}
 }
@@ -152,6 +152,9 @@ int fd_append_file (struct file *file) {
 	
 	while (fd_table[curr->fd_idx] != NULL) {
 		curr->fd_idx++;
+
+		if (check_valid_fd (curr->fd_idx))
+			return -1;
 	}
 
 	fd_table[curr->fd_idx] = file;
@@ -255,7 +258,6 @@ int read(int fd, void *buffer, unsigned size) {
 	lock_acquire (&file_lock);
 
 	int ret = -1;
-	struct file *file = fd_get_file (fd);
 
 	if (fd == STD_IN) {
 		int i;
@@ -275,12 +277,8 @@ int read(int fd, void *buffer, unsigned size) {
 		ret = -1;
 	}
 	else {
-		if (file == NULL) {
-			lock_release (&file_lock);
-			return -1;
-		}
-		
-		ret = file_read (file, buffer, size);
+		struct file *file = fd_get_file (fd);
+		ret = (file == NULL) ? -1 : file_read (file, buffer, size);
 	}
 
 	lock_release (&file_lock);
@@ -294,7 +292,6 @@ int write(int fd, const void *buffer, unsigned size) {
 	lock_acquire (&file_lock);
 
 	int ret = -1;
-	struct file *file = fd_get_file (fd);
 
 	if (fd == STD_IN) {
 		ret = -1;
@@ -304,12 +301,8 @@ int write(int fd, const void *buffer, unsigned size) {
 		ret = size;
 	}
 	else {
-		if (file == NULL) {
-			lock_release (&file_lock);
-			return -1;
-		}
-		
-		ret = file_write (file, buffer, size);
+		struct file *file = fd_get_file (fd);
+		ret = (file == NULL) ? -1 : file_write (file, buffer, size);
 	}
 
 	lock_release (&file_lock);
