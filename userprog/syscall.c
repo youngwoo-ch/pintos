@@ -270,7 +270,6 @@ int read(int fd, void *buffer, unsigned size) {
 	else if (file == STD_IN + 1) {
 		if (curr->count_stdin == 0){
 			NOT_REACHED ();
-
 			fd_remove_file (fd);
 			ret = -1;
 		}
@@ -406,11 +405,15 @@ unsigned tell(int fd) {
 }
 
 void close(int fd) {
+	lock_acquire (&file_lock);
+
 	struct thread *curr = thread_current ();
 	struct file *file = fd_get_file (fd);
 
-	if (file == NULL)
+	if (file == NULL || check_valid_fd (fd)) {
+		lock_release (&file_lock);
 		return;
+	}
 	
 	if (fd == STD_IN || file == STD_IN + 1)
 		curr->count_stdin--;
@@ -419,8 +422,10 @@ void close(int fd) {
 	
 	fd_remove_file (fd);
 
-	if (fd <= STD_OUT || file <= STD_OUT)
+	if (fd <= STD_OUT || file == STD_IN + 1 || file == STD_OUT + 1) {
+		lock_release (&file_lock);
 		return;
+	}
 
 	if (file->count_dup == 0) {
 		file_close (file);
@@ -428,6 +433,8 @@ void close(int fd) {
 	else {
 		file->count_dup--;
 	}
+
+	lock_release (&file_lock);
 
 	/* before dup2 */
 	// struct file *file = fd_get_file (fd);

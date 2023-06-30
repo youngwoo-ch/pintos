@@ -180,14 +180,48 @@ __do_fork (void *aux) {
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
 
+	if (parent->fd_idx >= FDCOUNT_LIMIT)
+		goto error;
+
+	int dup_count = 0;
+
 	for (int i = 0; i < FDCOUNT_LIMIT; i++) {
-		if (parent->fd_table[i] != NULL) {
-			if (i == STD_IN || i == STD_OUT)
+		struct file *file = parent->fd_table[i];
+		int dup_fd = -1;
+
+		if (file == NULL)
+			continue;
+
+		if (dup_count < 20) {
+			for (int j = 0; j < i; j++) {
+				if (file == parent->fd_table[j]) {
+					dup_fd = j;
+					dup_count++;
+					break;
+				}
+			}
+		}
+
+		if (dup_fd < 0) {
+			if (i == STD_IN || i == STD_OUT || file == STD_IN + 1 || file == STD_OUT + 1)
 				current->fd_table[i] = parent->fd_table[i];
 			else
 				current->fd_table[i] = file_duplicate (parent->fd_table[i]);
 		}
+		else {
+			current->fd_table[i] = parent->fd_table[dup_fd];
+		}
 	}
+
+	/* before dup2 */
+	// for (int i = 0; i < FDCOUNT_LIMIT; i++) {
+	// 	if (parent->fd_table[i] != NULL) {
+	// 		if (i == STD_IN || i == STD_OUT)
+	// 			current->fd_table[i] = parent->fd_table[i];
+	// 		else
+	// 			current->fd_table[i] = file_duplicate (parent->fd_table[i]);
+	// 	}
+	// }
 
 	current->fd_idx = parent->fd_idx;
 
@@ -259,8 +293,9 @@ process_wait (tid_t child_tid UNUSED) {
 	struct thread *curr = thread_current ();
 	struct thread *child = thread_get_child (child_tid);
 
-	if (child == NULL)
+	if (child == NULL) {
 		return -1;
+	}
 	
 	sema_down (&child->wait_sema);
 
@@ -280,7 +315,6 @@ process_exit (void) {
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
-
 	for (int i = 0; i < FDCOUNT_LIMIT; i++)
 		close (i);
 
