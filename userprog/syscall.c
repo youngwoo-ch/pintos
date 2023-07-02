@@ -37,6 +37,7 @@ int write(int fd, const void *buffer, unsigned size);
 void seek(int fd, unsigned position);
 unsigned tell(int fd);
 void close(int fd);
+int dup2(int oldfd, int newfd);
 
 /* System call.
  *
@@ -115,6 +116,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		close (f->R.rdi);
 		break;
 	case SYS_DUP2:
+		f->R.rax = dup2 (f->R.rdi, f->R.rsi);
 		break;
 	default:
 		break;
@@ -257,23 +259,36 @@ int read(int fd, void *buffer, unsigned size) {
 
 	lock_acquire (&file_lock);
 
+	struct thread *curr = thread_current ();
+	struct file *file = fd_get_file (fd);
+
 	int ret = -1;
 
-	if (fd == STD_IN) {
-		int i;
-		unsigned char *buf = buffer;
-
-		for (i = 0; i < size; i++) {
-			char c = input_getc ();
-			*buf++ = c;
-			
-			if (c == '\0')
-				break;
-		}
-
-		ret = i;
+	if (file == NULL){
+		ret = -1;
 	}
-	else if (fd == STD_OUT) {
+	else if (file == STD_IN + 1) {
+		if (curr->count_stdin == 0){
+			NOT_REACHED ();
+			fd_remove_file (fd);
+			ret = -1;
+		}
+		else {
+			int i;
+			unsigned char *buf = buffer;
+
+			for (i = 0; i < size; i++) {
+				char c = input_getc ();
+				*buf++ = c;
+				
+				if (c == '\0')
+					break;
+			}
+
+			ret = i;
+		}
+	}
+	else if (file == STD_OUT + 1) {
 		ret = -1;
 	}
 	else {
@@ -284,6 +299,35 @@ int read(int fd, void *buffer, unsigned size) {
 	lock_release (&file_lock);
 
 	return ret;
+
+	/* before dup2 */
+	// int ret = -1;
+
+	// if (fd == STD_IN) {
+	// 	int i;
+	// 	unsigned char *buf = buffer;
+
+	// 	for (i = 0; i < size; i++) {
+	// 		char c = input_getc ();
+	// 		*buf++ = c;
+			
+	// 		if (c == '\0')
+	// 			break;
+	// 	}
+
+	// 	ret = i;
+	// }
+	// else if (fd == STD_OUT) {
+	// 	ret = -1;
+	// }
+	// else {
+	// 	struct file *file = fd_get_file (fd);
+	// 	ret = (file == NULL) ? -1 : file_read (file, buffer, size);
+	// }
+
+	// lock_release (&file_lock);
+
+	// return ret;
 }
 
 int write(int fd, const void *buffer, unsigned size) {
@@ -291,14 +335,27 @@ int write(int fd, const void *buffer, unsigned size) {
 
 	lock_acquire (&file_lock);
 
+	struct thread *curr = thread_current ();
+	struct file *file = fd_get_file (fd);
+
 	int ret = -1;
 
-	if (fd == STD_IN) {
+	if (file == NULL) {
 		ret = -1;
 	}
-	else if (fd == STD_OUT) {
-		putbuf (buffer, size);
-		ret = size;
+	else if (file == STD_IN + 1) {
+		ret = -1;
+	}
+	else if (file == STD_OUT + 1) {
+		if (curr->count_stdout == 0) {
+			NOT_REACHED ();
+			fd_remove_file (fd);
+			ret = -1;
+		}
+		else {
+			putbuf (buffer, size);
+			ret = size;
+		}
 	}
 	else {
 		struct file *file = fd_get_file (fd);
@@ -308,6 +365,25 @@ int write(int fd, const void *buffer, unsigned size) {
 	lock_release (&file_lock);
 
 	return ret;
+
+	/* before dup2 */
+	// int ret = -1;
+
+	// if (fd == STD_IN) {
+	// 	ret = -1;
+	// }
+	// else if (fd == STD_OUT) {
+	// 	putbuf (buffer, size);
+	// 	ret = size;
+	// }
+	// else {
+	// 	struct file *file = fd_get_file (fd);
+	// 	ret = (file == NULL) ? -1 : file_write (file, buffer, size);
+	// }
+
+	// lock_release (&file_lock);
+
+	// return ret;
 }
 
 void seek(int fd, unsigned position) {
@@ -329,12 +405,74 @@ unsigned tell(int fd) {
 }
 
 void close(int fd) {
+	lock_acquire (&file_lock);
+
+	struct thread *curr = thread_current ();
 	struct file *file = fd_get_file (fd);
 
-	if (file == NULL || fd <= STD_OUT)
+	if (file == NULL || check_valid_fd (fd)) {
+		lock_release (&file_lock);
 		return;
+	}
+	
+	if (fd == STD_IN || file == STD_IN + 1)
+		curr->count_stdin--;
+	if (fd == STD_OUT || file == STD_OUT + 1)
+		curr->count_stdout--;
 	
 	fd_remove_file (fd);
 
-	file_close (file);
+	if (fd <= STD_OUT || file == STD_IN + 1 || file == STD_OUT + 1) {
+		lock_release (&file_lock);
+		return;
+	}
+
+	if (file->count_dup == 0) {
+		file_close (file);
+	}
+	else {
+		file->count_dup--;
+	}
+
+	lock_release (&file_lock);
+
+	/* before dup2 */
+	// struct file *file = fd_get_file (fd);
+
+	// if (file == NULL || fd <= STD_OUT)
+	// 	return;
+	
+	// fd_remove_file (fd);
+
+	// file_close (file);
+}
+
+int dup2(int oldfd, int newfd) {
+	struct thread *curr = thread_current ();
+	struct file **fd_table = curr->fd_table;
+	struct file *file = fd_get_file (oldfd);
+
+	if (file == NULL)
+		return -1;
+	
+	if (oldfd == newfd)
+		return newfd;
+	
+	if (file == STD_IN + 1) {
+		curr->count_stdin++;
+	}
+	else if (file == STD_OUT + 1) {
+		curr->count_stdout++;
+	}
+	else {
+		file->count_dup++;
+	}
+
+	close (newfd);
+	fd_table[newfd] = file;
+
+	curr->dup_table[oldfd] = newfd;
+	curr->dup_table[newfd] = oldfd;
+
+	return newfd;
 }
