@@ -208,8 +208,14 @@ thread_create (const char *name, int priority,
 	if (t->fd_table == NULL) 
 		return TID_ERROR;
 	
-	// t->fd_table[STD_IN] = STD_IN + 1;
-	// t->fd_table[STD_OUT] = STD_OUT + 1;
+	t->fd_table[STD_IN] = STD_IN + 1;
+	t->fd_table[STD_OUT] = STD_OUT + 1;
+
+	t->count_stdin = 1;
+	t->count_stdout = 1;
+	t->dup_table = (int *) malloc (sizeof (int) * FDCOUNT_LIMIT);
+	for (int i = 0; i < FDCOUNT_LIMIT; i++)
+		t->dup_table[i] == NULL;
 
 	struct thread *parent = thread_current ();
 	list_push_back (&parent->child_list, &t->child_elem);
