@@ -183,8 +183,6 @@ __do_fork (void *aux) {
 	if (parent->fd_idx >= FDCOUNT_LIMIT)
 		goto error;
 
-	int dup_count = 0;
-
 	for (int i = 0; i < FDCOUNT_LIMIT; i++) {
 		struct file *file = parent->fd_table[i];
 		int dup_fd = -1;
@@ -192,17 +190,11 @@ __do_fork (void *aux) {
 		if (file == NULL)
 			continue;
 
-		if (dup_count < 20) {
-			for (int j = 0; j < i; j++) {
-				if (file == parent->fd_table[j]) {
-					dup_fd = j;
-					dup_count++;
-					break;
-				}
-			}
+		if (parent->dup_table[i] != NULL) {
+			dup_fd = parent->dup_table[i];
 		}
 
-		if (dup_fd < 0) {
+		if (dup_fd < 0 || i < dup_fd) {
 			if (i == STD_IN || i == STD_OUT || file == STD_IN + 1 || file == STD_OUT + 1)
 				current->fd_table[i] = parent->fd_table[i];
 			else

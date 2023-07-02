@@ -471,5 +471,8 @@ int dup2(int oldfd, int newfd) {
 	close (newfd);
 	fd_table[newfd] = file;
 
+	curr->dup_table[oldfd] = newfd;
+	curr->dup_table[newfd] = oldfd;
+
 	return newfd;
 }
