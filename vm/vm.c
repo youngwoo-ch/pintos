@@ -1,5 +1,6 @@
 /* vm.c: Generic interface for virtual memory objects. */
 
+#include "threads/vaddr.h"
 #include "threads/malloc.h"
 #include "vm/vm.h"
 #include "vm/inspect.h"
@@ -69,9 +70,9 @@ spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
 	struct page *page = (struct page*) malloc (sizeof (struct page));
 	struct hash_elem *e;
 
-	page->va = pg_round_down(va);
-	e = hash(&spt->page_table, &page->hash_elem);
-	free(page);
+	page->va = pg_round_down (va);
+	e = hash_find (&spt->page_table, &page->hash_elem);
+	free (page);
 
 	return e != NULL ? hash_entry (e, struct page, hash_elem) : NULL;
 }
@@ -152,8 +153,17 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 	struct page *page = NULL;
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
+	if (is_kernel_vaddr(addr))
+		return false;
 
-	return vm_do_claim_page (page);
+	if (not_present) {
+		if (!vm_claim_page(addr))
+			return false;
+		else
+			return true;
+	}
+
+	return false;
 }
 
 /* Free the page.
@@ -167,8 +177,10 @@ vm_dealloc_page (struct page *page) {
 /* Claim the page that allocate on VA. */
 bool
 vm_claim_page (void *va UNUSED) {
-	struct page *page = NULL;
-	/* TODO: Fill this function */
+	struct page *page = spt_find_page (&thread_current ()->spt, va);
+
+	if (page == NULL)
+		return false;
 
 	return vm_do_claim_page (page);
 }
