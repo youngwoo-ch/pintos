@@ -59,7 +59,7 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
 		typedef bool (*initializerFunc)(struct page *, enum vm_type, void *);
 		initializerFunc initializer = NULL;
 		
-		switch(VM_TPYE(type)){
+		switch(VM_TYPE(type)){
 			case VM_ANON:
 				initializer = anon_initializer;
 				break;
