@@ -4,6 +4,8 @@
 #include "vm/vm.h"
 #include "vm/inspect.h"
 
+struct list frame_table;
+
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
 void
@@ -16,6 +18,7 @@ vm_init (void) {
 	register_inspect_intr ();
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
+	list_init (&frame_table);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -112,11 +115,22 @@ vm_evict_frame (void) {
  * space.*/
 static struct frame *
 vm_get_frame (void) {
-	struct frame *frame = NULL;
-	/* TODO: Fill this function. */
+	struct frame *frame = (struct frame*) malloc (sizeof (struct frame));
+
+	frame->kva = palloc_get_page (PAL_USER);
+
+	if (frame->kva == NULL) {
+		frame = vm_evict_frame ();
+	}
+	else {
+		list_push_back (&frame_table, &frame->elem);
+	}
+
+	frame->page = NULL;
 
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
+
 	return frame;
 }
 
