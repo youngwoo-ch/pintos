@@ -1,8 +1,11 @@
 /* vm.c: Generic interface for virtual memory objects. */
 
+#include "threads/vaddr.h"
 #include "threads/malloc.h"
 #include "vm/vm.h"
 #include "vm/inspect.h"
+
+struct list frame_table;
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -16,6 +19,7 @@ vm_init (void) {
 	register_inspect_intr ();
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
+	list_init (&frame_table);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -63,20 +67,22 @@ err:
 /* Find VA from spt and return page. On error, return NULL. */
 struct page *
 spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
-	struct page *page = NULL;
-	/* TODO: Fill this function. */
+	struct page *page = (struct page*) malloc (sizeof (struct page));
+	struct hash_elem *e;
 
-	return page;
+	page->va = pg_round_down (va);
+	e = hash_find (&spt->page_table, &page->hash_elem);
+	free (page);
+
+	return e != NULL ? hash_entry (e, struct page, hash_elem) : NULL;
 }
 
 /* Insert PAGE into spt with validation. */
 bool
 spt_insert_page (struct supplemental_page_table *spt UNUSED,
 		struct page *page UNUSED) {
-	int succ = false;
-	/* TODO: Fill this function. */
 
-	return succ;
+	return hash_insert (&spt->page_table, &page->hash_elem) == NULL ? true : false;
 }
 
 void
@@ -88,8 +94,7 @@ spt_remove_page (struct supplemental_page_table *spt, struct page *page) {
 /* Get the struct frame, that will be evicted. */
 static struct frame *
 vm_get_victim (void) {
-	struct frame *victim = NULL;
-	 /* TODO: The policy for eviction is up to you. */
+	struct frame *victim = list_entry (list_pop_front(&frame_table), struct frame, elem);
 
 	return victim;
 }
@@ -98,8 +103,9 @@ vm_get_victim (void) {
  * Return NULL on error.*/
 static struct frame *
 vm_evict_frame (void) {
-	struct frame *victim UNUSED = vm_get_victim ();
-	/* TODO: swap out the victim and return the evicted frame. */
+	struct frame *victim = vm_get_victim ();
+	
+	swap_out (victim->page);
 
 	return NULL;
 }
@@ -110,11 +116,22 @@ vm_evict_frame (void) {
  * space.*/
 static struct frame *
 vm_get_frame (void) {
-	struct frame *frame = NULL;
-	/* TODO: Fill this function. */
+	struct frame *frame = (struct frame*) malloc (sizeof (struct frame));
+
+	frame->kva = palloc_get_page (PAL_USER);
+
+	if (frame->kva == NULL) {
+		frame = vm_evict_frame ();
+	}
+	else {
+		list_push_back (&frame_table, &frame->elem);
+	}
+
+	frame->page = NULL;
 
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
+
 	return frame;
 }
 
@@ -136,8 +153,17 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 	struct page *page = NULL;
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
+	if (is_kernel_vaddr(addr))
+		return false;
 
-	return vm_do_claim_page (page);
+	if (not_present) {
+		if (!vm_claim_page(addr))
+			return false;
+		else
+			return true;
+	}
+
+	return false;
 }
 
 /* Free the page.
@@ -151,8 +177,10 @@ vm_dealloc_page (struct page *page) {
 /* Claim the page that allocate on VA. */
 bool
 vm_claim_page (void *va UNUSED) {
-	struct page *page = NULL;
-	/* TODO: Fill this function */
+	struct page *page = spt_find_page (&thread_current ()->spt, va);
+
+	if (page == NULL)
+		return false;
 
 	return vm_do_claim_page (page);
 }
@@ -167,6 +195,8 @@ vm_do_claim_page (struct page *page) {
 	page->frame = frame;
 
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
+	if (!install_page (page->va, frame->kva, page->writable))
+		return false;
 
 	return swap_in (page, frame->kva);
 }
@@ -174,6 +204,7 @@ vm_do_claim_page (struct page *page) {
 /* Initialize new supplemental page table */
 void
 supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
+	hash_init(&spt->page_table, page_hash, page_less, NULL);
 }
 
 /* Copy supplemental page table from src to dst */
@@ -187,4 +218,23 @@ void
 supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
+}
+
+unsigned page_hash(const struct hash_elem *p_ , void *aux UNUSED) {
+    const struct page *p = hash_entry(p_, struct page, hash_elem);
+    return hash_bytes(&p->va, sizeof p->va);
+}
+
+bool page_less(const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED) {
+    const struct page *a = hash_entry(a_, struct page, hash_elem);
+    const struct page *b = hash_entry(b_, struct page, hash_elem);
+
+    return a->va < b->va;
+}
+
+static bool install_page (void *upage, void *kpage, bool writable) {
+	struct thread *t = thread_current ();
+
+	return (pml4_get_page (t->pml4, upage) == NULL
+			&& pml4_set_page (t->pml4, upage, kpage, writable));
 }
