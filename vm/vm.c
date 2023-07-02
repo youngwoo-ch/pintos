@@ -183,6 +183,8 @@ vm_do_claim_page (struct page *page) {
 	page->frame = frame;
 
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
+	if (!install_page (page->va, frame->kva, page->writable))
+		return false;
 
 	return swap_in (page, frame->kva);
 }
@@ -216,4 +218,11 @@ bool page_less(const struct hash_elem *a_, const struct hash_elem *b_, void *aux
     const struct page *b = hash_entry(b_, struct page, hash_elem);
 
     return a->va < b->va;
+}
+
+static bool install_page (void *upage, void *kpage, bool writable) {
+	struct thread *t = thread_current ();
+
+	return (pml4_get_page (t->pml4, upage) == NULL
+			&& pml4_set_page (t->pml4, upage, kpage, writable));
 }

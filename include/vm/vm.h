@@ -47,6 +47,7 @@ struct page {
 	struct frame *frame;   /* Back reference for frame */
 
 	/* Your implementation */
+	bool writable;
 	struct hash_elem hash_elem;
 
 	/* Per-type data are binded into the union.
@@ -115,5 +116,6 @@ enum vm_type page_get_type (struct page *page);
 
 unsigned page_hash(const struct hash_elem *p_ , void *aux UNUSED);
 bool page_less(const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
+static bool install_page (void *upage, void *kpage, bool writable);
 
 #endif  /* VM_VM_H */
