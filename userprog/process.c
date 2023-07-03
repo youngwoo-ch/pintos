@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <hash.h>
 #include "userprog/gdt.h"
 #include "userprog/tss.h"
 #include "filesys/directory.h"
@@ -183,6 +184,7 @@ __do_fork (void *aux) {
 	if (parent->fd_idx >= FDCOUNT_LIMIT)
 		goto error;
 
+	/* for dup2 */
 	for (int i = 0; i < FDCOUNT_LIMIT; i++) {
 		struct file *file = parent->fd_table[i];
 		int dup_fd = -1;

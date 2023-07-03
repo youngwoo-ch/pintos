@@ -8,6 +8,7 @@
 #include "threads/flags.h"
 #include "userprog/gdt.h"
 #include "userprog/process.h"
+#include "vm/vm.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 #include "kernel/stdio.h"
@@ -17,6 +18,8 @@ void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
 void check_address(const uint64_t *uaddr);
+struct page *check_virtual_address (void *addr);
+void check_valid_buffer (void* buffer, unsigned size, void* rsp, bool to_write);
 bool check_valid_fd (int fd);
 
 static struct file *fd_get_file (int fd);
@@ -70,6 +73,8 @@ syscall_init (void) {
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
+
+	thread_current ()->rsp_stack = f->rsp;
 	// TODO: Your implementation goes here.
 	switch (f->R.rax)
 	{
@@ -83,27 +88,34 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		f->R.rax = fork (f->R.rdi, f);
 		break;
 	case SYS_EXEC:
-		if (exec (f->R.rdi) < 0) exit (TID_ERROR);
+		check_virtual_address (f->R.rdi);
+		if (exec (f->R.rdi) < 0) 
+			exit (TID_ERROR);
 		break;
 	case SYS_WAIT:
 		f->R.rax = wait (f->R.rdi);
 		break;
 	case SYS_CREATE:
+		check_virtual_address (f->R.rdi);
 		f->R.rax = create (f->R.rdi, f->R.rsi);
 		break;
 	case SYS_REMOVE:
+		check_virtual_address (f->R.rdi);
 		f->R.rax = remove (f->R.rdi);
 		break;
 	case SYS_OPEN:
+		check_virtual_address (f->R.rdi);
 		f->R.rax = open (f->R.rdi);
 		break;
 	case SYS_FILESIZE:
 		f->R.rax = filesize (f->R.rdi);
 		break;
 	case SYS_READ:
+		check_valid_buffer (f->R.rsi, f->R.rdx, f->rsp, true);
 		f->R.rax = read (f->R.rdi, f->R.rsi, f->R.rdx);
 		break;
 	case SYS_WRITE:
+		check_valid_buffer (f->R.rsi, f->R.rdx, f->rsp, false);
 		f->R.rax = write (f->R.rdi, f->R.rsi, f->R.rdx);
 		break;
 	case SYS_SEEK:
@@ -123,11 +135,38 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	}
 }
 
-void check_address(const uint64_t *uaddr) {
+/* additional function */
+void check_address (const uint64_t *uaddr) {
 	struct thread *curr = thread_current();
 	
 	if (uaddr == NULL || !is_user_vaddr(uaddr) || pml4_get_page(curr->pml4, uaddr) == NULL) {
 		exit(TID_ERROR);
+	}
+}
+
+struct page *check_virtual_address (void *addr) {
+	if (addr == NULL || !is_user_vaddr (addr)) {
+		exit (TID_ERROR);
+	}
+	
+	return spt_find_page (&thread_current ()->spt, addr);
+}
+
+void check_valid_buffer (void* buffer, unsigned size, void* rsp, bool to_write) {
+	struct page* page;
+
+	if (buffer <= USER_STACK && buffer >= rsp) {
+		return;
+	}
+
+	for (int i = 0; i < size; i++) {
+		page = check_virtual_address (buffer + i);
+		if (page == NULL) {
+			exit (TID_ERROR);
+		}
+		if (to_write == true && page->writable == false) {
+			exit (TID_ERROR);
+		}
 	}
 }
 
@@ -173,6 +212,9 @@ void fd_remove_file (int fd) {
 	curr->fd_table[fd] = NULL;
 }
 
+
+
+/* system call function */
 void halt(void) {
 	power_off ();
 }
@@ -191,10 +233,6 @@ tid_t fork(const char *thread_name, struct intr_frame *f) {
 }
 
 int exec(char *file_name) {
-#ifdef USERPROG
-	check_address (file_name);
-#endif
-
 	int file_size = strlen (file_name) + 1;
 	char *file_copy = palloc_get_page (PAL_ZERO);
 
@@ -215,30 +253,17 @@ int wait (tid_t pid) {
 }
 
 int create (const char *file, unsigned initial_size) {
-#ifdef USERPROG
-	check_address (file);
-#endif
 	return filesys_create (file, initial_size);
 }
 
 int remove (const char *file) {
-#ifdef USERPROG
-	check_address (file);
-#endif
 	return filesys_remove (file);
 }
 
 int open(const char *file_name) {
-#ifdef USERPROG
-	check_address (file_name);
-#endif
-
-	lock_acquire (&file_lock);
-
 	struct file *file = filesys_open (file_name);
 
 	if (file == NULL) {
-		lock_release (&file_lock);
 		return -1;
 	}
 
@@ -247,8 +272,6 @@ int open(const char *file_name) {
 	if (fd == -1) {
 		file_close (file);
 	}
-
-	lock_release (&file_lock);
 
 	return fd;
 }
@@ -263,9 +286,6 @@ int filesize(int fd) {
 }
 
 int read(int fd, void *buffer, unsigned size) {
-#ifdef USERPROG
-	check_address (buffer);
-#endif
 	lock_acquire (&file_lock);
 
 	struct thread *curr = thread_current ();
@@ -340,9 +360,6 @@ int read(int fd, void *buffer, unsigned size) {
 }
 
 int write(int fd, const void *buffer, unsigned size) {
-#ifdef USERPROG
-	check_address (buffer);
-#endif
 	lock_acquire (&file_lock);
 
 	struct thread *curr = thread_current ();
