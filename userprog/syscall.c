@@ -73,6 +73,8 @@ syscall_init (void) {
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
+
+	thread_current ()->rsp_stack = f->rsp;
 	// TODO: Your implementation goes here.
 	switch (f->R.rax)
 	{
@@ -86,45 +88,34 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		f->R.rax = fork (f->R.rdi, f);
 		break;
 	case SYS_EXEC:
-	#ifdef VM
 		check_virtual_address (f->R.rdi);
-	#endif
-		if (exec (f->R.rdi) < 0) exit (TID_ERROR);
+		if (exec (f->R.rdi) < 0) 
+			exit (TID_ERROR);
 		break;
 	case SYS_WAIT:
 		f->R.rax = wait (f->R.rdi);
 		break;
 	case SYS_CREATE:
-	#ifdef VM
 		check_virtual_address (f->R.rdi);
-	#endif
 		f->R.rax = create (f->R.rdi, f->R.rsi);
 		break;
 	case SYS_REMOVE:
-	#ifdef VM
 		check_virtual_address (f->R.rdi);
-	#endif
 		f->R.rax = remove (f->R.rdi);
 		break;
 	case SYS_OPEN:
-	#ifdef VM
 		check_virtual_address (f->R.rdi);
-	#endif
 		f->R.rax = open (f->R.rdi);
 		break;
 	case SYS_FILESIZE:
 		f->R.rax = filesize (f->R.rdi);
 		break;
 	case SYS_READ:
-	#ifdef VM
 		check_valid_buffer (f->R.rsi, f->R.rdx, f->rsp, true);
-	#endif
 		f->R.rax = read (f->R.rdi, f->R.rsi, f->R.rdx);
 		break;
 	case SYS_WRITE:
-	#ifdef VM
 		check_valid_buffer (f->R.rsi, f->R.rdx, f->rsp, false);
-	#endif
 		f->R.rax = write (f->R.rdi, f->R.rsi, f->R.rdx);
 		break;
 	case SYS_SEEK:
@@ -154,8 +145,9 @@ void check_address (const uint64_t *uaddr) {
 }
 
 struct page *check_virtual_address (void *addr) {
-	if(is_kernel_vaddr(addr) || addr == NULL) 
-		exit(-1);
+	if (addr == NULL || !is_user_vaddr (addr)) {
+		exit (TID_ERROR);
+	}
 	
 	return spt_find_page (&thread_current ()->spt, addr);
 }
@@ -170,10 +162,10 @@ void check_valid_buffer (void* buffer, unsigned size, void* rsp, bool to_write) 
 	for (int i = 0; i < size; i++) {
 		page = check_virtual_address (buffer + i);
 		if (page == NULL) {
-			exit(-1);
+			exit (TID_ERROR);
 		}
 		if (to_write == true && page->writable == false) {
-			exit(-1);
+			exit (TID_ERROR);
 		}
 	}
 }
@@ -241,10 +233,6 @@ tid_t fork(const char *thread_name, struct intr_frame *f) {
 }
 
 int exec(char *file_name) {
-#ifdef USERPROG
-	check_address (file_name);
-#endif
-
 	int file_size = strlen (file_name) + 1;
 	char *file_copy = palloc_get_page (PAL_ZERO);
 
@@ -265,24 +253,14 @@ int wait (tid_t pid) {
 }
 
 int create (const char *file, unsigned initial_size) {
-#ifdef USERPROG
-	check_address (file);
-#endif
 	return filesys_create (file, initial_size);
 }
 
 int remove (const char *file) {
-#ifdef USERPROG
-	check_address (file);
-#endif
 	return filesys_remove (file);
 }
 
 int open(const char *file_name) {
-#ifdef USERPROG
-	check_address (file_name);
-#endif
-
 	lock_acquire (&file_lock);
 
 	struct file *file = filesys_open (file_name);
@@ -313,10 +291,6 @@ int filesize(int fd) {
 }
 
 int read(int fd, void *buffer, unsigned size) {
-#ifdef USERPROG
-	check_address (buffer);
-#endif
-
 	lock_acquire (&file_lock);
 
 	struct thread *curr = thread_current ();
@@ -391,9 +365,6 @@ int read(int fd, void *buffer, unsigned size) {
 }
 
 int write(int fd, const void *buffer, unsigned size) {
-#ifdef USERPROG
-	check_address (buffer);
-#endif
 	lock_acquire (&file_lock);
 
 	struct thread *curr = thread_current ();

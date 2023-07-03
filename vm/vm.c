@@ -54,17 +54,22 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
 
 	/* Check wheter the upage is already occupied or not. */
 	if (spt_find_page (spt, upage) == NULL) {
-		struct page *page = (struct page*) malloc (sizeof (struct page));
+		struct page* page = (struct page*)malloc(sizeof(struct page));
 
-		switch (VM_TYPE(type)) {
-			case VM_ANON:
-				uninit_new(page, upage, init, type, aux, anon_initializer);
-				break;
-			case VM_FILE:
-				uninit_new(page, upage, init, type, aux, file_backed_initializer);
-				break;
+        typedef bool (*initializerFunc)(struct page *, enum vm_type, void *);
+        initializerFunc initializer = NULL;
+
+        switch(VM_TYPE(type)){
+            case VM_ANON:
+                initializer = anon_initializer;
+                break;
+            case VM_FILE:
+                initializer = file_backed_initializer;
+                break;
 		}
-		page->writable = writable;
+
+        uninit_new(page, upage, init, type, aux, initializer);
+        page->writable = writable;
 
 		return spt_insert_page(spt, page);
 	}
@@ -113,9 +118,6 @@ static struct frame *
 vm_evict_frame (void) {
 	struct frame *victim = vm_get_victim ();
 	swap_out (victim->page);
-
-	// victim->page->frame = NULL;
-	// victim->page = NULL;
 
 	return victim;
 }
@@ -226,6 +228,37 @@ supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
 bool
 supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 		struct supplemental_page_table *src UNUSED) {
+	struct hash_iterator i;
+    hash_first (&i, &src->page_table);
+    while (hash_next (&i)) {
+        struct page *parent_page = hash_entry (hash_cur (&i), struct page, hash_elem);
+        enum vm_type type = page_get_type (parent_page);
+        void *upage = parent_page->va;
+        bool writable = parent_page->writable;
+        vm_initializer *init = parent_page->uninit.init;
+        void* aux = parent_page->uninit.aux;
+
+        if (parent_page->uninit.type & VM_MARKER_0) {
+            setup_stack (&thread_current ()->tf);
+        }
+        else if (parent_page->operations->type == VM_UNINIT) {
+            if (!vm_alloc_page_with_initializer (type, upage, writable, init, aux))
+                return false;
+        }
+        else {
+            if (!vm_alloc_page (type, upage, writable))
+                return false;
+				
+            if (!vm_claim_page (upage))
+                return false;
+        }
+
+        if (parent_page->operations->type != VM_UNINIT) {
+            struct page* child_page = spt_find_page (dst, upage);
+            memcpy (child_page->frame->kva, parent_page->frame->kva, PGSIZE);
+        }
+    }
+    return true;
 }
 
 /* Free the resource hold by the supplemental page table */
@@ -257,4 +290,20 @@ static bool install_page (void *upage, void *kpage, bool writable) {
 	struct thread *t = thread_current ();
 
 	return (pml4_get_page (t->pml4, upage) == NULL && pml4_set_page (t->pml4, upage, kpage, writable));
+}
+
+static bool setup_stack (struct intr_frame *if_) {
+	bool success = false;
+	void *stack_bottom = (void *) (((uint8_t *) USER_STACK) - PGSIZE);
+
+	if (vm_alloc_page (VM_ANON | VM_MARKER_0, stack_bottom, true)) {
+		success = vm_claim_page (stack_bottom);
+
+		if (success) {
+			if_->rsp = USER_STACK;
+			thread_current ()->stack_bottom = stack_bottom;
+		}
+	}
+
+	return success;
 }
