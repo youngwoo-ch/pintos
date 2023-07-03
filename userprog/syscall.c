@@ -191,7 +191,9 @@ tid_t fork(const char *thread_name, struct intr_frame *f) {
 }
 
 int exec(char *file_name) {
+#ifdef USERPROG
 	check_address (file_name);
+#endif
 
 	int file_size = strlen (file_name) + 1;
 	char *file_copy = palloc_get_page (PAL_ZERO);
@@ -213,17 +215,23 @@ int wait (tid_t pid) {
 }
 
 int create (const char *file, unsigned initial_size) {
+#ifdef USERPROG
 	check_address (file);
+#endif
 	return filesys_create (file, initial_size);
 }
 
 int remove (const char *file) {
+#ifdef USERPROG
 	check_address (file);
+#endif
 	return filesys_remove (file);
 }
 
 int open(const char *file_name) {
+#ifdef USERPROG
 	check_address (file_name);
+#endif
 
 	lock_acquire (&file_lock);
 
@@ -255,8 +263,9 @@ int filesize(int fd) {
 }
 
 int read(int fd, void *buffer, unsigned size) {
+#ifdef USERPROG
 	check_address (buffer);
-
+#endif
 	lock_acquire (&file_lock);
 
 	struct thread *curr = thread_current ();
@@ -331,8 +340,9 @@ int read(int fd, void *buffer, unsigned size) {
 }
 
 int write(int fd, const void *buffer, unsigned size) {
+#ifdef USERPROG
 	check_address (buffer);
-
+#endif
 	lock_acquire (&file_lock);
 
 	struct thread *curr = thread_current ();
