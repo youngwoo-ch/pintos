@@ -268,6 +268,17 @@ supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	 * TODO: writeback all the modified contents to the storage. */
 	if (hash_empty (&spt->page_table))
 		return;
+	
+	struct hash_iterator i;
+
+    hash_first (&i, &spt->page_table);
+    while (hash_next (&i)) {
+        struct page *page = hash_entry (hash_cur (&i), struct page, hash_elem);
+
+        if (page->operations->type == VM_FILE) {
+            do_munmap (page->va);
+        }
+    }
 
 	hash_destroy(&spt->page_table, page_destroy);
 }
