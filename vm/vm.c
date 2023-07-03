@@ -114,8 +114,8 @@ vm_evict_frame (void) {
 	struct frame *victim = vm_get_victim ();
 	swap_out (victim->page);
 
-	victim->page->frame = NULL;
-	victim->page = NULL;
+	// victim->page->frame = NULL;
+	// victim->page = NULL;
 
 	return victim;
 }
@@ -213,7 +213,7 @@ vm_do_claim_page (struct page *page) {
 	page->frame = frame;
 
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
-	return pml4_set_page (thread_current ()->pml4, page->va, frame->kva, page->writable) ? swap_in (page, frame->kva) : false;
+	return install_page (page->va, frame->kva, page->writable) ? swap_in (page, frame->kva) : false;
 }
 
 /* Initialize new supplemental page table */
@@ -251,4 +251,10 @@ bool page_less(const struct hash_elem *a_, const struct hash_elem *b_, void *aux
 static void page_destroy (struct hash_elem *e, void *aux UNUSED) {
 	struct page *page = hash_entry (e, struct page, hash_elem);
 	free (page);
+}
+
+static bool install_page (void *upage, void *kpage, bool writable) {
+	struct thread *t = thread_current ();
+
+	return (pml4_get_page (t->pml4, upage) == NULL && pml4_set_page (t->pml4, upage, kpage, writable));
 }

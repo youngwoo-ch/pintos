@@ -172,7 +172,7 @@ void check_valid_buffer (void* buffer, unsigned size, void* rsp, bool to_write) 
 		if (page == NULL) {
 			exit(-1);
 		}
-		if(to_write == true && page->writable == false) {
+		if (to_write == true && page->writable == false) {
 			exit(-1);
 		}
 	}
