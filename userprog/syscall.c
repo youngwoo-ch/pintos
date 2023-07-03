@@ -261,12 +261,9 @@ int remove (const char *file) {
 }
 
 int open(const char *file_name) {
-	lock_acquire (&file_lock);
-
 	struct file *file = filesys_open (file_name);
 
 	if (file == NULL) {
-		lock_release (&file_lock);
 		return -1;
 	}
 
@@ -275,8 +272,6 @@ int open(const char *file_name) {
 	if (fd == -1) {
 		file_close (file);
 	}
-
-	lock_release (&file_lock);
 
 	return fd;
 }

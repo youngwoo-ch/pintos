@@ -248,7 +248,7 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
         else {
             if (!vm_alloc_page (type, upage, writable))
                 return false;
-				
+
             if (!vm_claim_page (upage))
                 return false;
         }
@@ -266,6 +266,9 @@ void
 supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
+	if (hash_empty (&spt->page_table))
+		return;
+
 	hash_destroy(&spt->page_table, page_destroy);
 }
 

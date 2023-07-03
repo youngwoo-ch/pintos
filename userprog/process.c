@@ -184,6 +184,7 @@ __do_fork (void *aux) {
 	if (parent->fd_idx >= FDCOUNT_LIMIT)
 		goto error;
 
+	/* for dup2 */
 	for (int i = 0; i < FDCOUNT_LIMIT; i++) {
 		struct file *file = parent->fd_table[i];
 		int dup_fd = -1;
@@ -330,8 +331,7 @@ process_cleanup (void) {
 	struct thread *curr = thread_current ();
 
 #ifdef VM
-	if (!hash_empty (&curr->spt.page_table))
-		supplemental_page_table_kill (&curr->spt);
+	supplemental_page_table_kill (&curr->spt);
 #endif
 
 	uint64_t *pml4;
