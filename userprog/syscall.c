@@ -8,6 +8,7 @@
 #include "threads/flags.h"
 #include "userprog/gdt.h"
 #include "userprog/process.h"
+#include "vm/vm.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 #include "kernel/stdio.h"
@@ -17,6 +18,8 @@ void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
 void check_address(const uint64_t *uaddr);
+struct page *check_virtual_address (void *addr);
+void check_valid_buffer (void* buffer, unsigned size, void* rsp, bool to_write);
 bool check_valid_fd (int fd);
 
 static struct file *fd_get_file (int fd);
@@ -83,27 +86,45 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		f->R.rax = fork (f->R.rdi, f);
 		break;
 	case SYS_EXEC:
+	#ifdef VM
+		check_virtual_address (f->R.rdi);
+	#endif
 		if (exec (f->R.rdi) < 0) exit (TID_ERROR);
 		break;
 	case SYS_WAIT:
 		f->R.rax = wait (f->R.rdi);
 		break;
 	case SYS_CREATE:
+	#ifdef VM
+		check_virtual_address (f->R.rdi);
+	#endif
 		f->R.rax = create (f->R.rdi, f->R.rsi);
 		break;
 	case SYS_REMOVE:
+	#ifdef VM
+		check_virtual_address (f->R.rdi);
+	#endif
 		f->R.rax = remove (f->R.rdi);
 		break;
 	case SYS_OPEN:
+	#ifdef VM
+		check_virtual_address (f->R.rdi);
+	#endif
 		f->R.rax = open (f->R.rdi);
 		break;
 	case SYS_FILESIZE:
 		f->R.rax = filesize (f->R.rdi);
 		break;
 	case SYS_READ:
+	#ifdef VM
+		check_valid_buffer (f->R.rsi, f->R.rdx, f->rsp, true);
+	#endif
 		f->R.rax = read (f->R.rdi, f->R.rsi, f->R.rdx);
 		break;
 	case SYS_WRITE:
+	#ifdef VM
+		check_valid_buffer (f->R.rsi, f->R.rdx, f->rsp, false);
+	#endif
 		f->R.rax = write (f->R.rdi, f->R.rsi, f->R.rdx);
 		break;
 	case SYS_SEEK:
@@ -123,11 +144,37 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	}
 }
 
-void check_address(const uint64_t *uaddr) {
+/* additional function */
+void check_address (const uint64_t *uaddr) {
 	struct thread *curr = thread_current();
 	
 	if (uaddr == NULL || !is_user_vaddr(uaddr) || pml4_get_page(curr->pml4, uaddr) == NULL) {
 		exit(TID_ERROR);
+	}
+}
+
+struct page *check_virtual_address (void *addr) {
+	if(is_kernel_vaddr(addr) || addr == NULL) 
+		exit(-1);
+	
+	return spt_find_page (&thread_current ()->spt, addr);
+}
+
+void check_valid_buffer (void* buffer, unsigned size, void* rsp, bool to_write) {
+	struct page* page;
+
+	if (buffer <= USER_STACK && buffer >= rsp) {
+		return;
+	}
+
+	for (int i = 0; i < size; i++) {
+		page = check_virtual_address (buffer + i);
+		if (page == NULL) {
+			exit(-1);
+		}
+		if(to_write == true && page->writable == false) {
+			exit(-1);
+		}
 	}
 }
 
@@ -173,6 +220,9 @@ void fd_remove_file (int fd) {
 	curr->fd_table[fd] = NULL;
 }
 
+
+
+/* system call function */
 void halt(void) {
 	power_off ();
 }
@@ -266,6 +316,7 @@ int read(int fd, void *buffer, unsigned size) {
 #ifdef USERPROG
 	check_address (buffer);
 #endif
+
 	lock_acquire (&file_lock);
 
 	struct thread *curr = thread_current ();
