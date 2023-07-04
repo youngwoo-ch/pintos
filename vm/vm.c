@@ -107,7 +107,10 @@ spt_remove_page (struct supplemental_page_table *spt, struct page *page) {
 /* Get the struct frame, that will be evicted. */
 static struct frame *
 vm_get_victim (void) {
-	struct frame *victim = list_entry (list_pop_front (&frame_table), struct frame, elem);
+	struct frame *victim = NULL;
+	
+	if (!list_empty (&frame_table))
+		victim = list_entry (list_pop_front (&frame_table), struct frame, elem);
 
 	return victim;
 }
@@ -117,6 +120,7 @@ vm_get_victim (void) {
 static struct frame *
 vm_evict_frame (void) {
 	struct frame *victim = vm_get_victim ();
+
 	swap_out (victim->page);
 
 	return victim;
@@ -133,7 +137,7 @@ vm_get_frame (void) {
 	frame->kva = palloc_get_page (PAL_USER);
 	if (frame->kva == NULL){
 		frame = vm_evict_frame ();
-		return frame;
+		// return frame;
 	}
 
 	list_push_back (&frame_table, &frame->elem);
