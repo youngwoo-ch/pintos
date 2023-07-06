@@ -145,6 +145,9 @@ page_fault (struct intr_frame *f) {
 	if (vm_try_handle_fault (f, fault_addr, user, write, not_present))
 		return;
 #endif
+	/* virtual memory */
+	exit (TID_ERROR);
+
 	/* userprog */
 	if(!user || is_kernel_vaddr(fault_addr) || not_present) 
 		exit (TID_ERROR);

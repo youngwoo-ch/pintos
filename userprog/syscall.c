@@ -137,6 +137,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		f->R.rax = mmap (f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
 		break;
 	case SYS_MUNMAP:
+		check_virtual_address (f->R.rdi);
 		munmap (f->R.rdi);
 		break;
 	default:

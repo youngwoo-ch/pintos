@@ -6,6 +6,7 @@
 #include "vm/inspect.h"
 
 struct list frame_table;
+struct list_elem *start;
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -20,6 +21,7 @@ vm_init (void) {
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
 	list_init (&frame_table);
+	start = list_begin (&frame_table);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -108,10 +110,31 @@ spt_remove_page (struct supplemental_page_table *spt, struct page *page) {
 static struct frame *
 vm_get_victim (void) {
 	struct frame *victim = NULL;
+	struct thread *curr = thread_current ();
+	struct list_elem *search_elem = start;
 	
-	if (!list_empty (&frame_table))
-		victim = list_entry (list_pop_front (&frame_table), struct frame, elem);
-
+	for (start = search_elem; start != list_end (&frame_table); start = list_next (start)) {
+		victim = list_entry (start, struct frame, elem);
+		
+		if (pml4_is_accessed (curr->pml4, victim->page->va)) {
+			pml4_set_accessed (curr->pml4, victim->page->va, 0);
+		} 
+		else {
+			return victim;
+		}
+	}
+	
+	for (start = list_begin (&frame_table); start != search_elem; start = list_next (start)) {
+		victim = list_entry (start, struct frame, elem);
+		
+		if (pml4_is_accessed (curr->pml4, victim->page->va)) {
+			pml4_set_accessed (curr->pml4, victim->page->va, 0);
+		} 
+		else {
+			return victim;
+		}
+	}
+	
 	return victim;
 }
 
@@ -137,7 +160,7 @@ vm_get_frame (void) {
 	frame->kva = palloc_get_page (PAL_USER);
 	if (frame->kva == NULL){
 		frame = vm_evict_frame ();
-		// return frame;
+		return frame;
 	}
 
 	list_push_back (&frame_table, &frame->elem);
@@ -171,12 +194,12 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 	struct page *page = NULL;
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
-	if (is_kernel_vaddr (addr)) {
+	if (!addr || is_kernel_vaddr (addr)) {
         return false;
 	}
 
     void *rsp_stack = is_kernel_vaddr (f->rsp) ? thread_current ()->rsp_stack : f->rsp;
-    if (not_present){
+    if (not_present) {
         if (!vm_claim_page (addr)) {
             if (rsp_stack - 8 <= addr && USER_STACK - 0x100000 <= addr && addr <= USER_STACK) {
                 vm_stack_growth (thread_current ()->stack_bottom - PGSIZE);
