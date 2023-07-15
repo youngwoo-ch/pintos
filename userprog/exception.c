@@ -146,21 +146,22 @@ page_fault (struct intr_frame *f) {
 		return;
 #endif
 	/* virtual memory */
+	page_fault_cnt++;
 	exit (TID_ERROR);
 
 	/* userprog */
-	if(!user || is_kernel_vaddr(fault_addr) || not_present) 
-		exit (TID_ERROR);
+	// if(!user || is_kernel_vaddr(fault_addr) || not_present) 
+	// 	exit (TID_ERROR);
 
 	/* Count page faults. */
-	page_fault_cnt++;
+	// page_fault_cnt++;
 
 	/* If the fault is true fault, show info and exit. */
-	printf ("Page fault at %p: %s error %s page in %s context.\n",
-			fault_addr,
-			not_present ? "not present" : "rights violation",
-			write ? "writing" : "reading",
-			user ? "user" : "kernel");
+	// printf ("Page fault at %p: %s error %s page in %s context.\n",
+	// 		fault_addr,
+	// 		not_present ? "not present" : "rights violation",
+	// 		write ? "writing" : "reading",
+	// 		user ? "user" : "kernel");
 	kill (f);
 }
 

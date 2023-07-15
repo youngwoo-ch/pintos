@@ -50,18 +50,18 @@ bool
 vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
 		vm_initializer *init, void *aux) {
 
-	ASSERT (VM_TYPE(type) != VM_UNINIT)
+	ASSERT (VM_TYPE (type) != VM_UNINIT)
 
 	struct supplemental_page_table *spt = &thread_current ()->spt;
 
 	/* Check wheter the upage is already occupied or not. */
 	if (spt_find_page (spt, upage) == NULL) {
-		struct page* page = (struct page*)malloc(sizeof(struct page));
+		struct page* page = (struct page*) malloc (sizeof (struct page));
 
         typedef bool (*initializerFunc)(struct page *, enum vm_type, void *);
         initializerFunc initializer = NULL;
 
-        switch(VM_TYPE(type)){
+        switch (VM_TYPE (type)){
             case VM_ANON:
                 initializer = anon_initializer;
                 break;
@@ -70,10 +70,10 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
                 break;
 		}
 
-        uninit_new(page, upage, init, type, aux, initializer);
+        uninit_new (page, upage, init, type, aux, initializer);
         page->writable = writable;
 
-		return spt_insert_page(spt, page);
+		return spt_insert_page (spt, page);
 	}
 err:
 	return false;
@@ -85,7 +85,7 @@ spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
 	struct page *page = (struct page*) malloc (sizeof (struct page));
 	struct hash_elem *e;
 
-	page->va = pg_round_down(va);
+	page->va = pg_round_down (va);
 	e = hash_find (&spt->page_table, &page->hash_elem);
 	free (page);
 
@@ -194,23 +194,21 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 	struct page *page = NULL;
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
-	if (!addr || is_kernel_vaddr (addr)) {
+	if (!addr || is_kernel_vaddr (addr) || !not_present) {
         return false;
 	}
 
     void *rsp_stack = is_kernel_vaddr (f->rsp) ? thread_current ()->rsp_stack : f->rsp;
-    if (not_present) {
-        if (!vm_claim_page (addr)) {
-            if (rsp_stack - 8 <= addr && USER_STACK - 0x100000 <= addr && addr <= USER_STACK) {
-                vm_stack_growth (thread_current ()->stack_bottom - PGSIZE);
-                return true;
-            }
-            return false;
-        }
-        else
-            return true;
-    }
-    return false;
+
+	if (!vm_claim_page (addr)) {
+		if (rsp_stack - 8 <= addr && USER_STACK - 0x100000 <= addr && addr <= USER_STACK) {
+			vm_stack_growth (thread_current ()->stack_bottom - PGSIZE);
+			return true;
+		}
+		return false;
+	}
+	else
+		return true;
 }
 
 /* Free the page.
@@ -257,6 +255,7 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 		struct supplemental_page_table *src UNUSED) {
 	struct hash_iterator i;
     hash_first (&i, &src->page_table);
+
     while (hash_next (&i)) {
         struct page *parent_page = hash_entry (hash_cur (&i), struct page, hash_elem);
         enum vm_type type = page_get_type (parent_page);
@@ -295,7 +294,7 @@ supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	 * TODO: writeback all the modified contents to the storage. */
 	if (hash_empty (&spt->page_table))
 		return;
-	
+
 	struct hash_iterator i;
 
     hash_first (&i, &spt->page_table);
@@ -307,7 +306,7 @@ supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
         }
     }
 
-	hash_destroy(&spt->page_table, page_destroy);
+	hash_destroy (&spt->page_table, page_destroy);
 }
 
 unsigned page_hash(const struct hash_elem *p_ , void *aux UNUSED) {

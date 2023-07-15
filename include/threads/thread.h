@@ -140,6 +140,7 @@ struct thread {
 	struct list child_list;
 	struct list_elem child_elem;
 
+	struct semaphore load_sema;
 	struct semaphore fork_sema;
 	struct semaphore wait_sema;
 	struct semaphore exit_sema;
