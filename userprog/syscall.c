@@ -42,6 +42,9 @@ unsigned tell(int fd);
 void close(int fd);
 int dup2(int oldfd, int newfd);
 
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset);
+void munmap (void *addr);
+
 /* System call.
  *
  * Previously system call services was handled by the interrupt handler
@@ -129,6 +132,13 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		break;
 	case SYS_DUP2:
 		f->R.rax = dup2 (f->R.rdi, f->R.rsi);
+		break;
+	case SYS_MMAP:
+		f->R.rax = mmap (f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
+		break;
+	case SYS_MUNMAP:
+		check_virtual_address (f->R.rdi);
+		munmap (f->R.rdi);
 		break;
 	default:
 		break;
@@ -238,7 +248,7 @@ int exec(char *file_name) {
 
 	if (file_copy == NULL)
 		exit (TID_ERROR);
-
+	
 	strlcpy (file_copy, file_name, file_size);
 
 	if (process_exec (file_copy) < 0)
@@ -253,15 +263,32 @@ int wait (tid_t pid) {
 }
 
 int create (const char *file, unsigned initial_size) {
-	return filesys_create (file, initial_size);
+	lock_acquire (&file_lock);
+	bool result = filesys_create (file, initial_size);
+	lock_release (&file_lock);
+	return result;
 }
 
 int remove (const char *file) {
-	return filesys_remove (file);
+	lock_acquire (&file_lock);
+	bool result = filesys_remove (file);
+	lock_release (&file_lock);
+	return result;
+}
+
+/* virtual memory - page merge race condition */
+struct file *open_file (char *file_name) {
+	lock_acquire (&file_lock);
+	struct file *file = filesys_open (file_name);
+	lock_release (&file_lock);
+
+	return file;
 }
 
 int open(const char *file_name) {
+	lock_acquire (&file_lock);
 	struct file *file = filesys_open (file_name);
+	lock_release (&file_lock);
 
 	if (file == NULL) {
 		return -1;
@@ -432,13 +459,10 @@ unsigned tell(int fd) {
 }
 
 void close(int fd) {
-	lock_acquire (&file_lock);
-
 	struct thread *curr = thread_current ();
 	struct file *file = fd_get_file (fd);
 
 	if (file == NULL || check_valid_fd (fd)) {
-		lock_release (&file_lock);
 		return;
 	}
 	
@@ -450,7 +474,6 @@ void close(int fd) {
 	fd_remove_file (fd);
 
 	if (fd <= STD_OUT || file == STD_IN + 1 || file == STD_OUT + 1) {
-		lock_release (&file_lock);
 		return;
 	}
 
@@ -460,8 +483,6 @@ void close(int fd) {
 	else {
 		file->count_dup--;
 	}
-
-	lock_release (&file_lock);
 
 	/* before dup2 */
 	// struct file *file = fd_get_file (fd);
@@ -502,4 +523,32 @@ int dup2(int oldfd, int newfd) {
 	curr->dup_table[newfd] = oldfd;
 
 	return newfd;
+}
+
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset) {
+    if (offset % PGSIZE != 0) {
+        return NULL;
+    }
+
+    if (pg_round_down (addr) != addr || is_kernel_vaddr (addr) || addr == NULL || (long long) length <= 0)
+        return NULL;
+    
+    if (fd == STD_IN || fd == STD_OUT)
+        exit (TID_ERROR);
+    
+    if (spt_find_page (&thread_current ()->spt, addr))
+        return NULL;
+
+    struct file *file = fd_get_file (fd);
+
+    if (file == NULL)
+        return NULL;
+
+    void * ret = do_mmap (addr, length, writable, file, offset);
+
+    return ret;
+}
+
+void munmap (void *addr) {
+    do_munmap (addr);
 }
