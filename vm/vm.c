@@ -2,6 +2,7 @@
 
 #include "threads/vaddr.h"
 #include "threads/malloc.h"
+#include "threads/mmu.h"
 #include "vm/vm.h"
 #include "vm/inspect.h"
 
@@ -72,6 +73,7 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
 
         uninit_new (page, upage, init, type, aux, initializer);
         page->writable = writable;
+		page->pml4 = thread_current ()->pml4;
 
 		return spt_insert_page (spt, page);
 	}
@@ -165,6 +167,7 @@ vm_get_frame (void) {
 
 	list_push_back (&frame_table, &frame->elem);
 	frame->page = NULL;
+	frame->cnt_cow = 0;
 
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
@@ -184,6 +187,23 @@ vm_stack_growth (void *addr UNUSED) {
 /* Handle the fault on write_protected page */
 static bool
 vm_handle_wp (struct page *page UNUSED) {
+	struct thread *curr = thread_current ();
+	struct frame *new_frame = vm_get_frame ();
+	struct frame *old_frame = page->frame;
+
+	page->frame = NULL;
+	pml4_clear_page (curr->pml4, page->va);
+
+	new_frame->page = page;
+	page->frame = new_frame;
+
+	if (!pml4_set_page (curr->pml4, page->va, new_frame->kva, page->writable))
+		return false;
+
+	memcpy (new_frame->kva, old_frame->kva, PGSIZE);
+	vm_down_cnt_cow (old_frame);
+
+	return true;
 }
 
 /* Return true on success */
@@ -194,9 +214,14 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 	struct page *page = NULL;
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
-	if (!addr || is_kernel_vaddr (addr) || !not_present) {
+
+	if (!addr || is_kernel_vaddr (addr)) {
         return false;
 	}
+
+	page = spt_find_page (spt, addr);
+	if (write && !not_present && page->frame->cnt_cow > 0)
+		return vm_handle_wp (page);
 
     void *rsp_stack = is_kernel_vaddr (f->rsp) ? thread_current ()->rsp_stack : f->rsp;
 
@@ -205,6 +230,7 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 			vm_stack_growth (thread_current ()->stack_bottom - PGSIZE);
 			return true;
 		}
+
 		return false;
 	}
 	else
@@ -264,25 +290,47 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
         vm_initializer *init = parent_page->uninit.init;
         void* aux = parent_page->uninit.aux;
 
-        if (parent_page->uninit.type & VM_MARKER_0) {
-            setup_stack (&thread_current ()->tf);
-        }
-        else if (parent_page->operations->type == VM_UNINIT) {
-            if (!vm_alloc_page_with_initializer (type, upage, writable, init, aux))
-                return false;
-        }
-        else {
-            if (!vm_alloc_page (type, upage, writable))
-                return false;
 
-            if (!vm_claim_page (upage))
-                return false;
-        }
+		if (parent_page->operations->type == VM_UNINIT) {
+			vm_alloc_page_with_initializer (type, upage, writable, init, aux);
+		}
+		else {
+			struct page *child_page = (struct page *) malloc (sizeof (struct page));
+			memcpy (child_page, parent_page, sizeof (struct page));
 
-        if (parent_page->operations->type != VM_UNINIT) {
-            struct page* child_page = spt_find_page (dst, upage);
-            memcpy (child_page->frame->kva, parent_page->frame->kva, PGSIZE);
-        }
+			if (!spt_insert_page (dst, child_page))
+				return false;
+			
+			if (!pml4_set_page (thread_current ()->pml4, child_page->va, child_page->frame->kva, false))
+				return false;
+			
+			if (!pml4_set_page (parent_page->pml4, parent_page->va, parent_page->frame->kva, false))
+				return false;
+			
+			child_page->frame->cnt_cow++;
+			child_page->pml4 = thread_current()->pml4;
+		}
+
+		/* before copy on write */
+        // if (parent_page->uninit.type & VM_MARKER_0) {
+        //     setup_stack (&thread_current ()->tf);
+        // }
+        // else if (parent_page->operations->type == VM_UNINIT) {
+        //     if (!vm_alloc_page_with_initializer (type, upage, writable, init, aux))
+        //         return false;
+        // }
+        // else {
+        //     if (!vm_alloc_page (type, upage, writable))
+        //         return false;
+
+        //     if (!vm_claim_page (upage))
+        //         return false;
+        // }
+
+        // if (parent_page->operations->type != VM_UNINIT) {
+        //     struct page* child_page = spt_find_page (dst, upage);
+        //     memcpy (child_page->frame->kva, parent_page->frame->kva, PGSIZE);
+		// }
     }
     return true;
 }
@@ -323,7 +371,15 @@ bool page_less(const struct hash_elem *a_, const struct hash_elem *b_, void *aux
 
 static void page_destroy (struct hash_elem *e, void *aux UNUSED) {
 	struct page *page = hash_entry (e, struct page, hash_elem);
-	free (page);
+	struct frame *frame = page->frame;
+
+	if (frame) {
+		if (frame->cnt_cow > 0) {
+			vm_down_cnt_cow (frame);
+		}
+	}
+
+	vm_dealloc_page (page);
 }
 
 static bool install_page (void *upage, void *kpage, bool writable) {
@@ -346,4 +402,13 @@ static bool setup_stack (struct intr_frame *if_) {
 	}
 
 	return success;
+}
+
+void vm_down_cnt_cow (struct frame *frame) {
+	frame->cnt_cow--;
+
+	if (frame->cnt_cow == 0) {
+		struct page *page = frame->page;
+		pml4_set_page (page->pml4, page->va, frame->kva, page->writable);
+	}
 }
