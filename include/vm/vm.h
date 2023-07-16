@@ -48,6 +48,7 @@ struct page {
 
 	/* Your implementation */
 	bool writable;
+	uint64_t *pml4;
 	struct hash_elem hash_elem;
 
 	/* Per-type data are binded into the union.
@@ -65,6 +66,7 @@ struct page {
 /* The representation of "frame" */
 struct frame {
 	void *kva;
+	int cnt_cow;
 	struct page *page;
 	struct list_elem elem;
 };
@@ -119,5 +121,6 @@ bool page_less(const struct hash_elem *a_, const struct hash_elem *b_, void *aux
 static void page_destroy (struct hash_elem *e, void *aux UNUSED);
 static bool install_page (void *upage, void *kpage, bool writable);
 static bool setup_stack (struct intr_frame *if_);
+void vm_down_cnt_cow (struct frame *frame);
 
 #endif  /* VM_VM_H */
