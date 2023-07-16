@@ -8,6 +8,7 @@
 #include "threads/flags.h"
 #include "userprog/gdt.h"
 #include "userprog/process.h"
+#include "vm/vm.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 #include "kernel/stdio.h"
@@ -17,6 +18,8 @@ void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
 void check_address(const uint64_t *uaddr);
+struct page *check_virtual_address (void *addr);
+void check_valid_buffer (void* buffer, unsigned size, void* rsp, bool to_write);
 bool check_valid_fd (int fd);
 
 static struct file *fd_get_file (int fd);
@@ -38,6 +41,9 @@ void seek(int fd, unsigned position);
 unsigned tell(int fd);
 void close(int fd);
 int dup2(int oldfd, int newfd);
+
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset);
+void munmap (void *addr);
 
 /* System call.
  *
@@ -70,6 +76,8 @@ syscall_init (void) {
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
+
+	thread_current ()->rsp_stack = f->rsp;
 	// TODO: Your implementation goes here.
 	switch (f->R.rax)
 	{
@@ -83,27 +91,34 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		f->R.rax = fork (f->R.rdi, f);
 		break;
 	case SYS_EXEC:
-		if (exec (f->R.rdi) < 0) exit (TID_ERROR);
+		check_virtual_address (f->R.rdi);
+		if (exec (f->R.rdi) < 0) 
+			exit (TID_ERROR);
 		break;
 	case SYS_WAIT:
 		f->R.rax = wait (f->R.rdi);
 		break;
 	case SYS_CREATE:
+		check_virtual_address (f->R.rdi);
 		f->R.rax = create (f->R.rdi, f->R.rsi);
 		break;
 	case SYS_REMOVE:
+		check_virtual_address (f->R.rdi);
 		f->R.rax = remove (f->R.rdi);
 		break;
 	case SYS_OPEN:
+		check_virtual_address (f->R.rdi);
 		f->R.rax = open (f->R.rdi);
 		break;
 	case SYS_FILESIZE:
 		f->R.rax = filesize (f->R.rdi);
 		break;
 	case SYS_READ:
+		check_valid_buffer (f->R.rsi, f->R.rdx, f->rsp, true);
 		f->R.rax = read (f->R.rdi, f->R.rsi, f->R.rdx);
 		break;
 	case SYS_WRITE:
+		check_valid_buffer (f->R.rsi, f->R.rdx, f->rsp, false);
 		f->R.rax = write (f->R.rdi, f->R.rsi, f->R.rdx);
 		break;
 	case SYS_SEEK:
@@ -118,16 +133,50 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	case SYS_DUP2:
 		f->R.rax = dup2 (f->R.rdi, f->R.rsi);
 		break;
+	case SYS_MMAP:
+		f->R.rax = mmap (f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
+		break;
+	case SYS_MUNMAP:
+		check_virtual_address (f->R.rdi);
+		munmap (f->R.rdi);
+		break;
 	default:
 		break;
 	}
 }
 
-void check_address(const uint64_t *uaddr) {
+/* additional function */
+void check_address (const uint64_t *uaddr) {
 	struct thread *curr = thread_current();
 	
 	if (uaddr == NULL || !is_user_vaddr(uaddr) || pml4_get_page(curr->pml4, uaddr) == NULL) {
 		exit(TID_ERROR);
+	}
+}
+
+struct page *check_virtual_address (void *addr) {
+	if (addr == NULL || !is_user_vaddr (addr)) {
+		exit (TID_ERROR);
+	}
+	
+	return spt_find_page (&thread_current ()->spt, addr);
+}
+
+void check_valid_buffer (void* buffer, unsigned size, void* rsp, bool to_write) {
+	struct page* page;
+
+	if (buffer <= USER_STACK && buffer >= rsp) {
+		return;
+	}
+
+	for (int i = 0; i < size; i++) {
+		page = check_virtual_address (buffer + i);
+		if (page == NULL) {
+			exit (TID_ERROR);
+		}
+		if (to_write == true && page->writable == false) {
+			exit (TID_ERROR);
+		}
 	}
 }
 
@@ -173,6 +222,9 @@ void fd_remove_file (int fd) {
 	curr->fd_table[fd] = NULL;
 }
 
+
+
+/* system call function */
 void halt(void) {
 	power_off ();
 }
@@ -191,14 +243,12 @@ tid_t fork(const char *thread_name, struct intr_frame *f) {
 }
 
 int exec(char *file_name) {
-	check_address (file_name);
-
 	int file_size = strlen (file_name) + 1;
 	char *file_copy = palloc_get_page (PAL_ZERO);
 
 	if (file_copy == NULL)
 		exit (TID_ERROR);
-
+	
 	strlcpy (file_copy, file_name, file_size);
 
 	if (process_exec (file_copy) < 0)
@@ -213,24 +263,34 @@ int wait (tid_t pid) {
 }
 
 int create (const char *file, unsigned initial_size) {
-	check_address (file);
-	return filesys_create (file, initial_size);
+	lock_acquire (&file_lock);
+	bool result = filesys_create (file, initial_size);
+	lock_release (&file_lock);
+	return result;
 }
 
 int remove (const char *file) {
-	check_address (file);
-	return filesys_remove (file);
+	lock_acquire (&file_lock);
+	bool result = filesys_remove (file);
+	lock_release (&file_lock);
+	return result;
+}
+
+/* virtual memory - page merge race condition */
+struct file *open_file (char *file_name) {
+	lock_acquire (&file_lock);
+	struct file *file = filesys_open (file_name);
+	lock_release (&file_lock);
+
+	return file;
 }
 
 int open(const char *file_name) {
-	check_address (file_name);
-
 	lock_acquire (&file_lock);
-
 	struct file *file = filesys_open (file_name);
+	lock_release (&file_lock);
 
 	if (file == NULL) {
-		lock_release (&file_lock);
 		return -1;
 	}
 
@@ -239,8 +299,6 @@ int open(const char *file_name) {
 	if (fd == -1) {
 		file_close (file);
 	}
-
-	lock_release (&file_lock);
 
 	return fd;
 }
@@ -255,8 +313,6 @@ int filesize(int fd) {
 }
 
 int read(int fd, void *buffer, unsigned size) {
-	check_address (buffer);
-
 	lock_acquire (&file_lock);
 
 	struct thread *curr = thread_current ();
@@ -331,8 +387,6 @@ int read(int fd, void *buffer, unsigned size) {
 }
 
 int write(int fd, const void *buffer, unsigned size) {
-	check_address (buffer);
-
 	lock_acquire (&file_lock);
 
 	struct thread *curr = thread_current ();
@@ -405,13 +459,10 @@ unsigned tell(int fd) {
 }
 
 void close(int fd) {
-	lock_acquire (&file_lock);
-
 	struct thread *curr = thread_current ();
 	struct file *file = fd_get_file (fd);
 
 	if (file == NULL || check_valid_fd (fd)) {
-		lock_release (&file_lock);
 		return;
 	}
 	
@@ -423,7 +474,6 @@ void close(int fd) {
 	fd_remove_file (fd);
 
 	if (fd <= STD_OUT || file == STD_IN + 1 || file == STD_OUT + 1) {
-		lock_release (&file_lock);
 		return;
 	}
 
@@ -433,8 +483,6 @@ void close(int fd) {
 	else {
 		file->count_dup--;
 	}
-
-	lock_release (&file_lock);
 
 	/* before dup2 */
 	// struct file *file = fd_get_file (fd);
@@ -475,4 +523,32 @@ int dup2(int oldfd, int newfd) {
 	curr->dup_table[newfd] = oldfd;
 
 	return newfd;
+}
+
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset) {
+    if (offset % PGSIZE != 0) {
+        return NULL;
+    }
+
+    if (pg_round_down (addr) != addr || is_kernel_vaddr (addr) || addr == NULL || (long long) length <= 0)
+        return NULL;
+    
+    if (fd == STD_IN || fd == STD_OUT)
+        exit (TID_ERROR);
+    
+    if (spt_find_page (&thread_current ()->spt, addr))
+        return NULL;
+
+    struct file *file = fd_get_file (fd);
+
+    if (file == NULL)
+        return NULL;
+
+    void * ret = do_mmap (addr, length, writable, file, offset);
+
+    return ret;
+}
+
+void munmap (void *addr) {
+    do_munmap (addr);
 }

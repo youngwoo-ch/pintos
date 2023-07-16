@@ -5,8 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <hash.h>
 #include "userprog/gdt.h"
 #include "userprog/tss.h"
+#include "userprog/syscall.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -97,7 +99,7 @@ process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 
 	if (child->exit_status == -1)
 		return TID_ERROR;
-	
+
 	return tid;
 }
 
@@ -183,6 +185,7 @@ __do_fork (void *aux) {
 	if (parent->fd_idx >= FDCOUNT_LIMIT)
 		goto error;
 
+	/* for dup2 */
 	for (int i = 0; i < FDCOUNT_LIMIT; i++) {
 		struct file *file = parent->fd_table[i];
 		int dup_fd = -1;
@@ -195,10 +198,12 @@ __do_fork (void *aux) {
 		}
 
 		if (dup_fd < 0 || i < dup_fd) {
-			if (i == STD_IN || i == STD_OUT || file == STD_IN + 1 || file == STD_OUT + 1)
+			if (i == STD_IN || i == STD_OUT || file == STD_IN + 1 || file == STD_OUT + 1) {
 				current->fd_table[i] = parent->fd_table[i];
-			else
+			}
+			else {
 				current->fd_table[i] = file_duplicate (parent->fd_table[i]);
+			}
 		}
 		else {
 			current->fd_table[i] = parent->fd_table[dup_fd];
@@ -225,7 +230,9 @@ __do_fork (void *aux) {
 	/* Finally, switch to the newly created process. */
 	if (succ)
 		do_iret (&if_);
+
 error:
+	current->exit_status = TID_ERROR;
 	sema_up (&current->fork_sema);
 	exit (TID_ERROR);
 	// thread_exit ();
@@ -238,7 +245,7 @@ process_exec (void *f_name) {
 	char *file_name = f_name;
 	char *copy_file_name = (char *) malloc (sizeof (char) * (strlen (file_name) + 1));
 	bool success;
-
+	
 	memcpy (copy_file_name, file_name, strlen (file_name) + 1);
 
 	/* We cannot use the intr_frame in the thread structure.
@@ -252,6 +259,10 @@ process_exec (void *f_name) {
 	/* We first kill the current context */
 	process_cleanup ();
 
+#ifdef VM
+	supplemental_page_table_init(&thread_current()->spt);
+#endif
+	
 	/* And then load the binary */
 	success = load (copy_file_name, &_if);
 
@@ -259,9 +270,8 @@ process_exec (void *f_name) {
 	palloc_free_page (file_name);
 	if (!success)
 		return -1;
-
+	
 	// hex_dump(_if.rsp, _if.rsp, KERN_BASE - _if.rsp, true);
-
 	/* Start switched process. */
 	do_iret (&_if);
 	NOT_REACHED ();
@@ -288,14 +298,14 @@ process_wait (tid_t child_tid UNUSED) {
 	if (child == NULL) {
 		return -1;
 	}
-	
+
 	sema_down (&child->wait_sema);
 
 	int exit_status = child->exit_status;
 	list_remove (&child->child_elem);
 
 	sema_up (&child->exit_sema);
-
+	
 	return exit_status;
 }
 
@@ -327,6 +337,8 @@ process_cleanup (void) {
 #ifdef VM
 	supplemental_page_table_kill (&curr->spt);
 #endif
+
+	return;
 
 	uint64_t *pml4;
 	/* Destroy the current process's page directory and switch back
@@ -484,7 +496,8 @@ load (const char *file_name, struct intr_frame *if_) {
 	process_activate (thread_current ());
 
 	/* Open executable file. */
-	file = filesys_open (file_name);
+	// file = filesys_open (file_name);
+	file = open_file (file_name);
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
@@ -726,11 +739,26 @@ install_page (void *upage, void *kpage, bool writable) {
  * If you want to implement the function for only project 2, implement it on the
  * upper block. */
 
-static bool
-lazy_load_segment (struct page *page, void *aux) {
+bool lazy_load_segment (struct page *page, void *aux) {
 	/* TODO: Load the segment from the file */
 	/* TODO: This called when the first page fault occurs on address VA. */
 	/* TODO: VA is available when calling this function. */
+	struct lazy_load_info *info = (struct lazy_load_info *) aux;
+	struct file *file = info->file;
+	off_t ofs = info->ofs;
+	size_t page_read_bytes = info->page_read_bytes;
+	size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+	file_seek (file, ofs);
+
+	if (file_read (file, page->frame->kva, page_read_bytes) != (int) page_read_bytes) {
+		palloc_free_page (page->frame->kva);
+		return false;
+	}
+
+	memset(page->frame->kva + page_read_bytes, 0, page_zero_bytes);
+
+	return true;
 }
 
 /* Loads a segment starting at offset OFS in FILE at address
@@ -747,8 +775,7 @@ lazy_load_segment (struct page *page, void *aux) {
  *
  * Return true if successful, false if a memory allocation error
  * or disk read error occurs. */
-static bool
-load_segment (struct file *file, off_t ofs, uint8_t *upage,
+static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		uint32_t read_bytes, uint32_t zero_bytes, bool writable) {
 	ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
 	ASSERT (pg_ofs (upage) == 0);
@@ -762,7 +789,11 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
 		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		void *aux = NULL;
+		struct lazy_load_info *aux = (struct lazy_load_info *) malloc (sizeof (struct lazy_load_info));
+		aux->file = file;
+		aux->ofs = ofs;
+		aux->page_read_bytes = page_read_bytes;
+
 		if (!vm_alloc_page_with_initializer (VM_ANON, upage,
 					writable, lazy_load_segment, aux))
 			return false;
@@ -771,6 +802,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
 		upage += PGSIZE;
+		ofs += page_read_bytes;
 	}
 	return true;
 }
@@ -785,6 +817,15 @@ setup_stack (struct intr_frame *if_) {
 	 * TODO: If success, set the rsp accordingly.
 	 * TODO: You should mark the page is stack. */
 	/* TODO: Your code goes here */
+
+	if (vm_alloc_page (VM_ANON | VM_MARKER_0, stack_bottom, true)) {
+		success = vm_claim_page (stack_bottom);
+
+		if (success) {
+			if_->rsp = USER_STACK;
+			thread_current ()->stack_bottom = stack_bottom;
+		}
+	}
 
 	return success;
 }

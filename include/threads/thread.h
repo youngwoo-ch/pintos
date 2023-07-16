@@ -140,6 +140,7 @@ struct thread {
 	struct list child_list;
 	struct list_elem child_elem;
 
+	struct semaphore load_sema;
 	struct semaphore fork_sema;
 	struct semaphore wait_sema;
 	struct semaphore exit_sema;
@@ -151,6 +152,8 @@ struct thread {
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */
 	struct supplemental_page_table spt;
+	void *rsp_stack;
+	void *stack_bottom;
 #endif
 
 	/* Owned by thread.c. */
